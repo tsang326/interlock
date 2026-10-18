@@ -202,10 +202,18 @@ and that is not a matter of prompting: the token it carries is refused by those 
 Reads and writes do not share a door either — naming `create_refund` on the read route
 fails exactly as naming nonsense does, and there is a test for that.
 
+The console has an **Agent** tab: the inbox, a Run button per message, and the run
+streaming as it happens — every PayPal call, the proposal, and what the agent told the
+merchant afterwards. The same thing runs from a terminal:
+
 ```bash
 pnpm --filter @warden/server agent            # work the whole demo inbox
 pnpm --filter @warden/server agent msg-5150   # one message
 ```
+
+Starting a run from the console takes the reviewer's token, because starting it is an
+operator's action. The agent it starts authenticates separately, as an agent, over HTTP:
+it does not inherit the caller's credentials and still cannot approve its own work.
 
 One of the three messages carries a prompt injection — a block addressed to "the
 processing agent" telling it the account is pre-cleared, to refund the full payment
@@ -298,6 +306,9 @@ One test is named `KNOWN LIMIT` and asserts a weakness rather than a strength. I
   both risk layers; the model's reasoning; the parameters bound for PayPal; and the agent's
   rationale, labelled untrusted.
 - **Policy** — the rules, in evaluation order, editable. Changing one is itself an audited event.
+- **Agent** — the inbox the agent works, and a live trace of one run: the PayPal calls it made,
+  the proposal it filed, and its report to the merchant. A run that files something leaves the
+  queue one click away.
 - **Audit** — the chain, with each entry's link to the one before it, and a verifier that walks it
   from the first entry. In sandbox mode there is a button that edits a row directly in the
   database so you can watch the check catch it.
@@ -314,7 +325,8 @@ A security tool that oversells itself is worse than none, so:
   *role* decided, not which human.
 - **The event stream is unauthenticated.** `EventSource` cannot send headers, so `/api/events` is
   open. It carries decision notifications only, and anything it reveals is already behind a
-  token-guarded read endpoint, but it is a gap worth naming.
+  token-guarded read endpoint, but it is a gap worth naming. It is the only such route: the agent
+  run streams newline-delimited JSON over a normal fetch precisely so it can stay behind a token.
 - **Tamper-evident, not tamper-proof.** The hashes are unkeyed, so anyone who can write to the
   database can recompute the chain. Removing entries from the *end* leaves a shorter chain that
   still reconciles — nothing links forward. Anchoring the tip outside the database fixes both, and

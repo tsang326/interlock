@@ -6,6 +6,8 @@ import type { Store } from '../core/db.js';
 import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
 import { InvalidTransition, SchemaRejection, type Warden } from '../core/warden.js';
 import { READABLE, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
+import { INBOX } from '../agent/inbox.js';
+import { runAgent } from '../agent/run.js';
 import { callerOf, requireRole } from './auth.js';
 
 const STATUSES: ProposalStatus[] = [
@@ -27,6 +29,8 @@ const ProposalBody = z.object({
   declaredAmount: z.object({ value: z.number(), currency: z.string().length(3) }).optional(),
   declaredCounterparty: z.string().max(200).optional(),
 });
+
+const AgentRunBody = z.object({ taskId: z.string().min(1).max(64) });
 
 const ReadBody = z.object({
   tool: z.string().min(1).max(64),
@@ -83,6 +87,55 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       demoTamperAvailable: config.paypal.sandbox,
       usingDemoTokens,
     });
+  });
+
+  /* ---- the agent ---- */
+
+  app.get('/api/agent/inbox', requireRole('agent', 'reviewer'), (_req, res) => {
+    res.json({ tasks: INBOX, available: anthropicConfigured });
+  });
+
+  /**
+   * Starts an agent run and streams its steps as newline-delimited JSON.
+   *
+   * Not server-sent events: `EventSource` cannot carry an Authorization header, which
+   * is why `/api/events` is the one open route in this server. A streamed fetch can,
+   * so this one stays behind a token like everything else.
+   *
+   * Starting a run is an operator action, so it needs the reviewer's token. The agent
+   * it starts authenticates separately, as an agent, over HTTP — it does not inherit
+   * the caller's credentials, and it still cannot approve its own work.
+   */
+  app.post('/api/agent/run', requireRole('reviewer'), async (req, res) => {
+    const parsed = AgentRunBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
+      return;
+    }
+    const task = INBOX.find((t) => t.id === parsed.data.taskId);
+    if (!task) {
+      res.status(404).json({ error: 'not_found', detail: `No message ${parsed.data.taskId}.` });
+      return;
+    }
+    if (!anthropicConfigured) {
+      res.status(503).json({
+        error: 'no_model',
+        detail: 'The agent needs ANTHROPIC_API_KEY. Warden itself runs without one.',
+      });
+      return;
+    }
+
+    res.setHeader('content-type', 'application/x-ndjson');
+    res.setHeader('cache-control', 'no-store');
+    const send = (event: unknown) => res.write(`${JSON.stringify(event)}\n`);
+
+    try {
+      const run = await runAgent(task, paypal, (step) => send({ type: 'step', step }));
+      send({ type: 'done', summary: run.summary, proposalIds: run.proposalIds, sessionId: run.sessionId });
+    } catch (error) {
+      send({ type: 'error', detail: error instanceof Error ? error.message : String(error) });
+    }
+    res.end();
   });
 
   /* ---- reading PayPal ---- */

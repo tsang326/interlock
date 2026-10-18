@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AgentPanel } from './components/AgentPanel';
 import { AuditPanel } from './components/AuditPanel';
 import { PolicyPanel } from './components/PolicyPanel';
 import { ProposalDetail } from './components/ProposalDetail';
@@ -13,7 +14,7 @@ import {
   type ProposalStatus,
 } from './lib/api';
 
-type Tab = 'queue' | 'policy' | 'audit';
+type Tab = 'queue' | 'agent' | 'policy' | 'audit';
 type Filter = 'pending' | 'all' | 'blocked' | 'executed';
 
 const FILTER_STATUS: Record<Filter, ProposalStatus | undefined> = {
@@ -126,6 +127,9 @@ export default function App() {
           Review queue
           {pendingCount > 0 && <span className="count">{pendingCount}</span>}
         </button>
+        <button className={`tab ${tab === 'agent' ? 'active' : ''}`} onClick={() => setTab('agent')}>
+          Agent
+        </button>
         <button className={`tab ${tab === 'policy' ? 'active' : ''}`} onClick={() => setTab('policy')}>
           Policy
         </button>
@@ -211,6 +215,16 @@ export default function App() {
             </>
           )}
 
+          {tab === 'agent' && (
+            <AgentPanel
+              onError={showError}
+              onProposals={(ids) => {
+                // A run that filed something should leave the reviewer one click from it.
+                void load();
+                if (ids[0]) setSelectedId(ids[0]);
+              }}
+            />
+          )}
           {tab === 'policy' && <PolicyPanel onError={showError} />}
           {tab === 'audit' && (
             <AuditPanel onError={showError} tamperAvailable={health?.demoTamperAvailable ?? false} />

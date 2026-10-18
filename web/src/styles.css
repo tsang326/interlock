@@ -638,3 +638,76 @@ button.linkish:hover {
   background: none;
   color: var(--text);
 }
+
+/* ---- the agent tab ---- */
+
+.inbox-body {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border-left: 2px solid var(--line);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.trace {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.trace-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.trace-row .mono {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-row.muted {
+  color: var(--muted);
+}
+
+/* What the agent said on the way, as opposed to what it did. */
+.trace-row.think {
+  color: var(--text);
+  padding-left: 22px;
+  white-space: pre-wrap;
+}
+
+.trace-arrow {
+  width: 14px;
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-summary {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.rich-bullet {
+  padding-left: 16px;
+  position: relative;
+}
+
+.rich-bullet::before {
+  content: '·';
+  position: absolute;
+  left: 4px;
+  color: var(--muted);
+}

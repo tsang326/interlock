@@ -57,6 +57,25 @@ export type Verification = {
   error?: string;
 };
 
+export type Task = {
+  id: string;
+  from: string;
+  subject: string;
+  body: string;
+  /** Why this message is in the demo. Shown to the operator; the agent never sees it. */
+  note: string;
+};
+
+export type AgentStep =
+  | { type: 'tool'; name: string; input: unknown }
+  | { type: 'result'; name: string; output: string }
+  | { type: 'text'; text: string };
+
+export type AgentEvent =
+  | { type: 'step'; step: AgentStep }
+  | { type: 'done'; summary: string; proposalIds: string[]; sessionId: string }
+  | { type: 'error'; detail: string };
+
 export type Rule = {
   id: string;
   name: string;
@@ -171,12 +190,62 @@ export const api = {
     request<Rule>(`/api/rules/${rule.id}`, { method: 'PUT', body: JSON.stringify(rule) }),
   audit: (limit = 200) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
   verifyChain: () => request<ChainVerification>('/api/audit/verify'),
+  agentInbox: () => request<{ tasks: Task[]; available: boolean }>('/api/agent/inbox'),
   demoTamper: () =>
     request<{ edited: { seq: number; field: string }; verification: ChainVerification }>(
       '/api/audit/demo-tamper',
       { method: 'POST' },
     ),
 };
+
+/**
+ * Runs the agent on one inbox message, calling `onEvent` as each step arrives.
+ *
+ * The stream is newline-delimited JSON over a normal fetch rather than server-sent
+ * events, because `EventSource` cannot carry an Authorization header and this route is
+ * not going to be the second open one.
+ */
+export async function runAgent(
+  taskId: string,
+  onEvent: (event: AgentEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = getToken();
+  const response = await fetch('/api/agent/run', {
+    method: 'POST',
+    signal,
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ taskId }),
+  });
+  if (!response.ok || !response.body) {
+    let detail = response.statusText;
+    try {
+      const body = (await response.json()) as { detail?: string };
+      detail = body.detail ?? detail;
+    } catch {
+      // Nothing better than the status line.
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += value;
+    // A chunk can split a line, so only whole lines are parsed and the tail is kept.
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.trim()) onEvent(JSON.parse(line) as AgentEvent);
+    }
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentEvent);
+}
 
 /** Subscribes to server-sent proposal events; returns an unsubscribe function. */
 export function subscribeToEvents(onEvent: (type: string) => void): () => void {

@@ -80,14 +80,21 @@ export async function runAgent(
     onStep?.(step);
   };
 
+  // The report is the last thing the agent says, not everything it says: the lines in
+  // between are it narrating its next move, and they do not belong in a summary.
+  let lastTurn: string[] = [];
+
   for await (const message of runner) {
+    const turn: string[] = [];
     for (const block of message.content) {
       if (block.type === 'text' && block.text.trim()) {
         record({ type: 'text', text: block.text });
+        turn.push(block.text);
       } else if (block.type === 'tool_use') {
         record({ type: 'tool', name: block.name, input: block.input });
       }
     }
+    if (turn.length > 0) lastTurn = turn;
     // The runner has already executed the tools for this message; surface what came
     // back so the transcript shows what the agent was actually told.
     const results = runner.params.messages.at(-1);
@@ -104,10 +111,7 @@ export async function runAgent(
     }
   }
 
-  const summary = steps
-    .filter((s): s is Extract<AgentStep, { type: 'text' }> => s.type === 'text')
-    .map((s) => s.text)
-    .join('\n\n');
+  const summary = lastTurn.join('\n\n');
 
   // Proposal ids come out of what Warden actually returned, not out of the agent's
   // account of what it did.
