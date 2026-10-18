@@ -236,7 +236,7 @@ The log is **tamper-evident, not tamper-proof**. See [Known limits](#known-limit
 
 ## Run it
 
-Requires Node 18+ and pnpm.
+Requires Node 24 and pnpm. (better-sqlite3 is a native module, so the Node version is not a free choice; this is the one it is built and tested against.)
 
 ```bash
 pnpm install

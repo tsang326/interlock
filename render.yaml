@@ -13,8 +13,11 @@ services:
     startCommand: node server/dist/index.js
     healthCheckPath: /api/health
     envVars:
+      # The version this was built and tested on. better-sqlite3 is a native module,
+      # so the Node version is not a free choice: changing it means it is rebuilt or
+      # recompiled, and that is worth doing deliberately rather than by drift.
       - key: NODE_VERSION
-        value: 22.20.0
+        value: 24.10.0
 
       # PayPal sandbox. Without these Warden still runs and approved actions are
       # simulated and labelled as such, but nothing can be verified against PayPal.
