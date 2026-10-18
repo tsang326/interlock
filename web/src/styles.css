@@ -578,3 +578,56 @@ dl.compare dd {
   height: 100%;
   padding: 6px 0;
 }
+
+/* ---------- sign-in ---------- */
+
+.signin {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgb(6 8 10 / 0.86);
+  backdrop-filter: blur(3px);
+  padding: 24px;
+}
+.signin > div {
+  width: min(460px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 22px 24px;
+}
+.signin b {
+  font-size: 16px;
+}
+.signin p {
+  margin: 8px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.signin form {
+  display: flex;
+  gap: 8px;
+}
+.signin input {
+  font-family: var(--mono);
+}
+.signin button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+button.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+}
+button.linkish:hover {
+  background: none;
+  color: var(--text);
+}

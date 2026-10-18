@@ -15,6 +15,7 @@ import Database from 'better-sqlite3';
 import { Store } from './core/db.js';
 import { deriveFacts, findMismatches } from './core/derive.js';
 import { seedDefaultRules } from './core/policy.js';
+import { createApi } from './http/api.js';
 import { Warden } from './core/warden.js';
 import { PayPalExecutor, type Executor } from './paypal/executor.js';
 import type { ActionKind, ProposalInput } from './core/types.js';
@@ -263,5 +264,98 @@ describe('the audit chain', () => {
     // Nothing links forward, so a chopped tail still reconciles. The UI must say
     // "tamper-evident", not "tamper-proof", until the tip is anchored outside the database.
     assert.equal(store.verifyChain().ok, true);
+  });
+});
+
+describe('the agent cannot decide its own proposals', () => {
+  /** Starts the real Express app on an ephemeral port and returns its base URL. */
+  async function serve() {
+    const store = freshStore(`http-${Math.random().toString(36).slice(2, 8)}`);
+    const warden = new Warden(store, new StubExecutor());
+    const app = createApi(store, warden, new PayPalExecutor());
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    // A proposal that is held, so there is something left to decide.
+    const proposal = await warden.submit(
+      refund({
+        declaredAmount: { value: 1, currency: 'USD' },
+        params: { capture_id: CAPTURE, amount: { currency_code: 'USD', value: '9500.00' } },
+      }),
+    );
+    assert.equal(proposal.status, 'pending');
+    return { base: `http://127.0.0.1:${port}`, proposal, store, close: () => server.close() };
+  }
+
+  const AGENT = { authorization: 'Bearer demo-agent-token' };
+  const REVIEWER = { authorization: 'Bearer demo-reviewer-token' };
+
+  test('every route but health refuses an unauthenticated caller', async () => {
+    const s = await serve();
+    try {
+      assert.equal((await fetch(`${s.base}/api/health`)).status, 200);
+      assert.equal((await fetch(`${s.base}/api/proposals`)).status, 401);
+      assert.equal((await fetch(`${s.base}/api/audit`)).status, 401);
+      const approve = await fetch(`${s.base}/api/proposals/${s.proposal.id}/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(approve.status, 401);
+    } finally {
+      s.close();
+    }
+  });
+
+  test('an agent token may propose and read, but never decide or rewrite policy', async () => {
+    const s = await serve();
+    try {
+      assert.equal((await fetch(`${s.base}/api/proposals`, { headers: AGENT })).status, 200);
+
+      const approve = await fetch(`${s.base}/api/proposals/${s.proposal.id}/approve`, {
+        method: 'POST',
+        headers: { ...AGENT, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(approve.status, 403);
+
+      const rule = await fetch(`${s.base}/api/rules/review-large-amount`, {
+        method: 'PUT',
+        headers: { ...AGENT, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'x',
+          enabled: false,
+          priority: 40,
+          when: { amountGte: 500 },
+          then: 'auto_approve',
+          reason: 'x',
+        }),
+      });
+      assert.equal(rule.status, 403);
+    } finally {
+      s.close();
+    }
+  });
+
+  test('the decision is attributed to the token, not to anything in the body', async () => {
+    const s = await serve();
+    try {
+      const response = await fetch(`${s.base}/api/proposals/${s.proposal.id}/reject`, {
+        method: 'POST',
+        headers: { ...REVIEWER, 'content-type': 'application/json' },
+        // A caller claiming to be someone else must not be believed.
+        body: JSON.stringify({ by: 'someone-else', note: 'checked the tracking' }),
+      });
+      assert.equal(response.status, 200);
+      const decided = (await response.json()) as { decidedBy: string };
+      assert.equal(decided.decidedBy, 'demo-reviewer');
+
+      const entry = s.store.auditEntries(1)[0]!;
+      assert.equal(entry.type, 'proposal.rejected');
+      assert.equal(entry.actor, 'demo-reviewer');
+    } finally {
+      s.close();
+    }
   });
 });

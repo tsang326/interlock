@@ -6,13 +6,12 @@ const HOT = /inject|instruct|urgen|suppress|attack|pressure|mismatch|inconsist|s
 
 type Props = {
   proposal?: Proposal;
-  reviewer: string;
   busy: boolean;
   onApprove: (id: string, note: string) => void;
   onReject: (id: string, note: string) => void;
 };
 
-export function ProposalDetail({ proposal, reviewer, busy, onApprove, onReject }: Props) {
+export function ProposalDetail({ proposal, busy, onApprove, onReject }: Props) {
   const [note, setNote] = useState('');
 
   if (!proposal) {
@@ -193,7 +192,8 @@ export function ProposalDetail({ proposal, reviewer, busy, onApprove, onReject }
             </button>
           </div>
           <div className="hint" style={{ marginTop: 8 }}>
-            Approving calls PayPal immediately, as {reviewer}.
+            Approving calls PayPal immediately. The decision is recorded against whoever your
+            token identifies — not a name typed into this page.
           </div>
         </>
       )}

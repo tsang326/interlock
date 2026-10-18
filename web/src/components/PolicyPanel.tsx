@@ -22,7 +22,7 @@ function describe(when: Record<string, unknown>): string {
   return parts.length > 0 ? parts.join(' and ') : 'always';
 }
 
-export function PolicyPanel({ reviewer, onError }: { reviewer: string; onError: (m: string) => void }) {
+export function PolicyPanel({ onError }: { onError: (m: string) => void }) {
   const [rules, setRules] = useState<Rule[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -33,7 +33,7 @@ export function PolicyPanel({ reviewer, onError }: { reviewer: string; onError: 
   const save = async (rule: Rule) => {
     setBusy(rule.id);
     try {
-      const saved = await api.saveRule(rule, reviewer);
+      const saved = await api.saveRule(rule);
       setRules((current) => current.map((r) => (r.id === saved.id ? saved : r)));
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));

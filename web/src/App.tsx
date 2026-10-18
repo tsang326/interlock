@@ -3,7 +3,15 @@ import { AuditPanel } from './components/AuditPanel';
 import { PolicyPanel } from './components/PolicyPanel';
 import { ProposalDetail } from './components/ProposalDetail';
 import { ReviewQueue } from './components/ReviewQueue';
-import { api, subscribeToEvents, type Health, type Proposal, type ProposalStatus } from './lib/api';
+import {
+  api,
+  getToken,
+  setToken,
+  subscribeToEvents,
+  type Health,
+  type Proposal,
+  type ProposalStatus,
+} from './lib/api';
 
 type Tab = 'queue' | 'policy' | 'audit';
 type Filter = 'pending' | 'all' | 'blocked' | 'executed';
@@ -24,7 +32,8 @@ export default function App() {
   const [health, setHealth] = useState<Health>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const reviewer = 'sang';
+  const [token, setTokenState] = useState(getToken());
+  const [tokenDraft, setTokenDraft] = useState('');
 
   const showError = useCallback((message: string) => {
     setError(message);
@@ -40,8 +49,8 @@ export default function App() {
   }, [filter, showError]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (token) void load();
+  }, [load, token]);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => undefined);
@@ -64,7 +73,7 @@ export default function App() {
     setBusy(true);
     try {
       for (const id of ids) {
-        await (action === 'approve' ? api.approve(id, reviewer, note) : api.reject(id, reviewer, note));
+        await (action === 'approve' ? api.approve(id, note) : api.reject(id, note));
       }
       await load();
     } catch (e) {
@@ -97,6 +106,18 @@ export default function App() {
           <div>
             Agent-callable reads <b>{health?.readOnlyTools ?? '—'}</b>
           </div>
+          {token && (
+            <button
+              className="linkish"
+              onClick={() => {
+                setToken('');
+                setTokenState('');
+                setTokenDraft('');
+              }}
+            >
+              sign out
+            </button>
+          )}
         </div>
       </header>
 
@@ -112,6 +133,36 @@ export default function App() {
           Audit
         </button>
       </nav>
+
+      {!token && (
+        <div className="signin">
+          <div>
+            <b>Sign in to review</b>
+            <p>
+              Warden answers nothing without a token, and the token decides what you may do.
+              An agent's token can file proposals but never approve them. The demo tokens are
+              in the project README.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setToken(tokenDraft.trim());
+                setTokenState(tokenDraft.trim());
+              }}
+            >
+              <input
+                value={tokenDraft}
+                onChange={(e) => setTokenDraft(e.target.value)}
+                placeholder="demo-reviewer-token"
+                autoFocus
+              />
+              <button className="primary" type="submit">
+                Use this token
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       <div className="main">
         <div className="content">
@@ -160,7 +211,7 @@ export default function App() {
             </>
           )}
 
-          {tab === 'policy' && <PolicyPanel reviewer={reviewer} onError={showError} />}
+          {tab === 'policy' && <PolicyPanel onError={showError} />}
           {tab === 'audit' && (
             <AuditPanel onError={showError} tamperAvailable={health?.demoTamperAvailable ?? false} />
           )}
@@ -169,7 +220,6 @@ export default function App() {
         {tab === 'queue' && (
           <ProposalDetail
             proposal={selected}
-            reviewer={reviewer}
             busy={busy}
             onApprove={(id, note) => void decide('approve', [id], note)}
             onReject={(id, note) => void decide('reject', [id], note)}

@@ -74,6 +74,7 @@ export type Health = {
   readOnlyTools: number;
   gatedActions: number;
   demoTamperAvailable: boolean;
+  usingDemoTokens: boolean;
 };
 
 export type ChainVerification = {
@@ -82,6 +83,30 @@ export type ChainVerification = {
   brokenAt?: number;
   message: string;
 };
+
+const TOKEN_KEY = 'warden.token';
+
+/**
+ * The reviewer's token lives in this browser only. It is never sent anywhere except to
+ * Warden's own API, and the server decides who you are from it — the UI cannot assert
+ * an identity of its own.
+ */
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // A browser with storage disabled still works for one session.
+  }
+}
 
 export class ApiError extends Error {
   constructor(
@@ -93,9 +118,14 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
   const response = await fetch(path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!response.ok) {
     let detail = response.statusText;
@@ -114,19 +144,20 @@ export const api = {
   health: () => request<Health>('/api/health'),
   proposals: (status?: ProposalStatus) =>
     request<Proposal[]>(`/api/proposals${status ? `?status=${status}` : ''}`),
-  approve: (id: string, by: string, note?: string) =>
+  // No identity is sent: the server reads it from the token.
+  approve: (id: string, note?: string) =>
     request<Proposal>(`/api/proposals/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ by, note }),
+      body: JSON.stringify({ note }),
     }),
-  reject: (id: string, by: string, note?: string) =>
+  reject: (id: string, note?: string) =>
     request<Proposal>(`/api/proposals/${id}/reject`, {
       method: 'POST',
-      body: JSON.stringify({ by, note }),
+      body: JSON.stringify({ note }),
     }),
   rules: () => request<Rule[]>('/api/rules'),
-  saveRule: (rule: Rule, by: string) =>
-    request<Rule>(`/api/rules/${rule.id}`, { method: 'PUT', body: JSON.stringify({ ...rule, by }) }),
+  saveRule: (rule: Rule) =>
+    request<Rule>(`/api/rules/${rule.id}`, { method: 'PUT', body: JSON.stringify(rule) }),
   audit: (limit = 200) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
   verifyChain: () => request<ChainVerification>('/api/audit/verify'),
   demoTamper: () =>
@@ -138,6 +169,8 @@ export const api = {
 
 /** Subscribes to server-sent proposal events; returns an unsubscribe function. */
 export function subscribeToEvents(onEvent: (type: string) => void): () => void {
+  // EventSource cannot carry a header, so the stream is open; it emits decision events
+  // but no proposal contents a reader could not already fetch.
   const source = new EventSource('/api/events');
   const types = [
     'proposal.created',

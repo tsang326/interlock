@@ -47,6 +47,8 @@ and subscriptions, where the money leaves the merchant's own account.
 ## How it works
 
 ```
+      agent token                                          reviewer token
+   (propose + read)                                     (decide + set policy)
                     the agent never holds PayPal credentials
                                       │
    ┌──────────┐   proposes   ┌────────┴─────────┐   approved only   ┌─────────┐
@@ -114,6 +116,26 @@ disagree, which is the useful part.
 If no Anthropic key is configured, the deterministic layer runs alone and every proposal is
 labelled as rules-only. Nothing silently loosens.
 
+### Two roles, because one would defeat the point
+
+Every endpoint but `/api/health` requires a bearer token, and the token decides what the
+caller may do:
+
+| | agent token | reviewer token |
+|---|---|---|
+| read the queue, rules and audit log | yes | yes |
+| file a proposal | yes | no |
+| approve or reject | **no — 403** | yes |
+| change policy rules | **no — 403** | yes |
+
+The agent cannot decide its own proposals. If one credential could do both, a compromised
+agent would approve its own work and the audit log would faithfully record a human decision
+that never happened — precise about a lie.
+
+Identity comes from the token and nothing else. A caller that puts `{"by": "someone-else"}`
+in a request body is ignored; the decision is attributed to whoever the token identifies.
+There is a test for exactly that.
+
 ### The audit log
 
 Each decision is appended carrying the SHA-256 hash of the entry before it, so every row is bound
@@ -134,6 +156,28 @@ pnpm install
 cp .env.example .env     # PayPal sandbox credentials; the Anthropic key is optional
 pnpm --filter @warden/server seed     # fills the review queue with a worked scenario
 pnpm dev                               # API on :8787, UI on http://localhost:5173
+```
+
+### Signing in
+
+The console asks for a token before it will show anything. Unless you set your own in
+`.env`, the demo values are:
+
+| role | token | what it can do |
+|---|---|---|
+| **reviewer** | `demo-reviewer-token` | decide proposals, edit policy — **use this one for the console** |
+| agent | `demo-agent-token` | file proposals and read; refused with 403 if it tries to decide |
+
+These are published defaults for a sandbox demo and are not secrets. Set
+`WARDEN_AGENT_TOKEN` and `WARDEN_REVIEWER_TOKEN` to use your own, and
+`WARDEN_REQUIRE_TOKENS=true` to refuse to start without them.
+
+Try the boundary yourself:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'authorization: Bearer demo-agent-token' -H 'content-type: application/json' \
+  localhost:8787/api/proposals/<id>/approve -d '{}'      # 403
 ```
 
 Get sandbox credentials from the [PayPal developer dashboard](https://developer.paypal.com/dashboard/)
@@ -172,10 +216,13 @@ One test is named `KNOWN LIMIT` and asserts a weakness rather than a strength. I
 
 A security tool that oversells itself is worse than none, so:
 
-- **No authentication.** Every endpoint is open and the reviewer's name is taken from the request
-  body. The audit log therefore records a *claimed* identity, not a verified one. This is a demo
-  deployment against a sandbox; it is the first thing to build next, along with separating the
-  agent's credentials from the reviewer's.
+- **Authentication is two static tokens, not user accounts.** It is enough to separate the agent
+  from the reviewer, which is the property that matters here, but there is no per-person identity,
+  no rotation, no expiry and no second approver on large amounts. The audit log records which
+  *role* decided, not which human.
+- **The event stream is unauthenticated.** `EventSource` cannot send headers, so `/api/events` is
+  open. It carries decision notifications only, and anything it reveals is already behind a
+  token-guarded read endpoint, but it is a gap worth naming.
 - **Tamper-evident, not tamper-proof.** The hashes are unkeyed, so anyone who can write to the
   database can recompute the chain. Removing entries from the *end* leaves a shorter chain that
   still reconciles — nothing links forward. Anchoring the tip outside the database fixes both, and
@@ -189,6 +236,8 @@ A security tool that oversells itself is worse than none, so:
   lives in PayPal rather than in the request. Warden marks these `unverifiable` and always asks a
   human. This is correct but it means those actions never run unattended.
 - **No rate limiting**, deliberately, so the demo can be driven freely against the sandbox.
+- **The demo tokens are published above**, which is correct for a sandbox and obviously not for
+  anything real.
 
 ---
 

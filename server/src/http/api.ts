@@ -1,11 +1,12 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
-import { anthropicConfigured, config, paypalConfigured } from '../config.js';
+import { anthropicConfigured, config, paypalConfigured, usingDemoTokens } from '../config.js';
 import type { Store } from '../core/db.js';
 import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
 import { InvalidTransition, SchemaRejection, type Warden } from '../core/warden.js';
 import { READ_ONLY_TOOLS, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
+import { callerOf, requireRole } from './auth.js';
 
 const STATUSES: ProposalStatus[] = [
   'pending',
@@ -28,7 +29,6 @@ const ProposalBody = z.object({
 });
 
 const DecisionBody = z.object({
-  by: z.string().min(1).max(80),
   note: z.string().max(1000).optional(),
 });
 
@@ -76,12 +76,13 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       readOnlyTools: READ_ONLY_TOOLS.length,
       gatedActions: ACTION_KINDS.length,
       demoTamperAvailable: config.paypal.sandbox,
+      usingDemoTokens,
     });
   });
 
   /* ---- proposals ---- */
 
-  app.get('/api/proposals', (req, res) => {
+  app.get('/api/proposals', requireRole('agent', 'reviewer'), (req, res) => {
     const status = req.query.status as ProposalStatus | undefined;
     if (status && !STATUSES.includes(status)) {
       res.status(400).json({ error: 'bad_status', detail: `Unknown status ${status}` });
@@ -93,7 +94,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
     );
   });
 
-  app.get('/api/proposals/:id', (req, res) => {
+  app.get<{ id: string }>('/api/proposals/:id', requireRole('agent', 'reviewer'), (req, res) => {
     const proposal = store.getProposal(req.params.id);
     if (!proposal) {
       res.status(404).json({ error: 'not_found' });
@@ -102,7 +103,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
     res.json({ ...proposal, resourceRef: proposal.result ? resourceRef(proposal.result) : undefined });
   });
 
-  app.post('/api/proposals', async (req, res) => {
+  app.post('/api/proposals', requireRole('agent'), async (req, res) => {
     const parsed = ProposalBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
@@ -115,27 +116,27 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
     }
   });
 
-  app.post('/api/proposals/:id/approve', async (req, res) => {
+  app.post<{ id: string }>('/api/proposals/:id/approve', requireRole('reviewer'), async (req, res) => {
     const parsed = DecisionBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
       return;
     }
     try {
-      res.json(await warden.approve(req.params.id, parsed.data.by, parsed.data.note));
+      res.json(await warden.approve(req.params.id, callerOf(req).actor, parsed.data.note));
     } catch (error) {
       fail(res, error);
     }
   });
 
-  app.post('/api/proposals/:id/reject', (req, res) => {
+  app.post<{ id: string }>('/api/proposals/:id/reject', requireRole('reviewer'), (req, res) => {
     const parsed = DecisionBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
       return;
     }
     try {
-      res.json(warden.reject(req.params.id, parsed.data.by, parsed.data.note));
+      res.json(warden.reject(req.params.id, callerOf(req).actor, parsed.data.note));
     } catch (error) {
       fail(res, error);
     }
@@ -143,30 +144,32 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
 
   /* ---- rules ---- */
 
-  app.get('/api/rules', (_req, res) => res.json(store.listRules()));
+  app.get('/api/rules', requireRole('agent', 'reviewer'), (_req, res) => res.json(store.listRules()));
 
-  app.put('/api/rules/:id', (req, res) => {
+  app.put<{ id: string }>('/api/rules/:id', requireRole('reviewer'), (req, res) => {
     const parsed = RuleBody.safeParse({ ...req.body, id: req.params.id });
     if (!parsed.success) {
       res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
       return;
     }
     store.upsertRule(parsed.data);
-    store.append('policy.updated', req.body.by ?? 'console', { rule: parsed.data });
+    store.append('policy.updated', callerOf(req).actor, { rule: parsed.data });
     res.json(parsed.data);
   });
 
   /* ---- audit ---- */
 
-  app.get('/api/audit', (req, res) => {
+  app.get('/api/audit', requireRole('agent', 'reviewer'), (req, res) => {
     const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
     res.json(store.auditEntries(limit));
   });
 
-  app.get('/api/audit/verify', (_req, res) => res.json(store.verifyChain()));
+  app.get('/api/audit/verify', requireRole('agent', 'reviewer'), (_req, res) =>
+    res.json(store.verifyChain()),
+  );
 
   // Only ever offered against the sandbox: pointed at live PayPal, this endpoint is gone.
-  app.post('/api/audit/demo-tamper', (_req, res) => {
+  app.post('/api/audit/demo-tamper', requireRole('reviewer'), (_req, res) => {
     if (!config.paypal.sandbox) {
       res.status(403).json({ error: 'demo_only', detail: 'Not available outside the sandbox.' });
       return;
