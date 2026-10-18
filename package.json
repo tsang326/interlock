@@ -9,6 +9,7 @@
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "seed": "pnpm --filter @warden/server seed"
+    "seed": "pnpm --filter @warden/server seed",
+    "test": "pnpm --filter @warden/server test"
   }
 }
