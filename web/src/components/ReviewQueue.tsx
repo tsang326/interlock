@@ -73,12 +73,17 @@ function AmountCell({ data }: { data?: Proposal }) {
   // agent's claim where it differs from the request.
   let note: string | undefined;
   if (contradicted) note = `PayPal: ${fromPayPal ?? 'disagrees'} ✕`;
+  // A lookup that was attempted and failed matters even when the request carries a
+  // figure: that figure is a ceiling, not proof there is anything left to refund.
+  else if (data.verification.status === 'unavailable') note = 'PayPal could not confirm';
   else if (!derived && fromPayPal) note = "PayPal's figure, not the agent's";
   else if (declared && declared !== derived) note = `agent said ${declared}${conflicted ? ' ✕' : ''}`;
-  else if (!derived) note = data.verification.status === 'unavailable' ? 'PayPal could not confirm' : 'not in the request';
+  else if (!derived) note = 'not in the request';
 
   return (
-    <span className={`amount${conflicted ? ' conflict' : ''}`}>
+    <span
+      className={`amount${conflicted ? ' conflict' : ''}${data.verification.status === 'unavailable' ? ' unconfirmed' : ''}`}
+    >
       <b>{derived ?? fromPayPal ?? 'unverifiable'}</b>
       {note && <small>{note}</small>}
     </span>

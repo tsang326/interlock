@@ -506,6 +506,13 @@ table.audit tr:hover td {
 .amount.conflict small {
   color: #ff9a92;
 }
+/* A figure PayPal did not stand behind must not read like one it did. */
+.amount.unconfirmed b {
+  color: var(--warn);
+}
+.amount.unconfirmed small {
+  color: var(--warn);
+}
 
 .layers {
   display: grid;
