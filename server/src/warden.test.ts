@@ -61,18 +61,17 @@ class StubExecutor implements Executor {
   }
 }
 
-/** A `list_transactions` answer naming one capture of `value`. */
-const captureOf = (value: string, currency = 'USD') => ({
-  list_transactions: {
-    transaction_details: [
-      {
-        transaction_info: {
-          transaction_id: CAPTURE,
-          transaction_status: 'S',
-          transaction_amount: { currency_code: currency, value },
-        },
-      },
-    ],
+/** A `show_capture_details` answer for a capture of `value`. */
+const captureOf = (value: string, status = 'COMPLETED', currency = 'USD') => ({
+  show_capture_details: {
+    id: CAPTURE,
+    status,
+    amount: { currency_code: currency, value },
+    seller_receivable_breakdown: {
+      gross_amount: { currency_code: currency, value },
+      paypal_fee: { currency_code: currency, value: '1.00' },
+      net_amount: { currency_code: currency, value: String(Number(value) - 1) },
+    },
   },
 });
 
@@ -220,7 +219,7 @@ describe('policy never decides on what the agent says about itself', () => {
   });
 
   test('an honest small refund still runs unattended, and PayPal is called once', async () => {
-    const executor = new StubExecutor();
+    const executor = new StubExecutor('succeed', captureOf('20.00'));
     const warden = new Warden(freshStore('honest'), executor);
     const proposal = await warden.submit(
       refund({ declaredAmount: { value: 20, currency: 'USD' } }),
@@ -249,7 +248,7 @@ describe('policy never decides on what the agent says about itself', () => {
   });
 
   test('a rejected PayPal call is recorded as failed, never as executed', async () => {
-    const warden = new Warden(freshStore('failed'), new StubExecutor('reject'));
+    const warden = new Warden(freshStore('failed'), new StubExecutor('reject', captureOf('20.00')));
     const proposal = await warden.submit(
       refund({ declaredAmount: { value: 20, currency: 'USD' } }),
     );
@@ -279,7 +278,7 @@ describe('policy never decides on what the agent says about itself', () => {
   });
 
   test('a proposal that claims nothing is judged on the request alone', async () => {
-    const warden = new Warden(freshStore('silent'), new StubExecutor());
+    const warden = new Warden(freshStore('silent'), new StubExecutor('succeed', captureOf('20.00')));
     const proposal = await warden.submit(refund({ declaredAmount: undefined }));
     assert.equal(proposal.status, 'executed');
   });
@@ -313,6 +312,35 @@ describe('what PayPal itself says', () => {
     assert.equal(proposal.status, 'pending');
     assert.ok(proposal.policy.matchedRules.includes('guard:paypal-contradiction'));
     assert.equal(executor.calls.length, 0, 'nothing reached PayPal');
+  });
+
+  test('a capture PayPal has already refunded cannot be refunded again', async () => {
+    const executor = new StubExecutor('succeed', captureOf('20.00', 'REFUNDED'));
+    const warden = new Warden(freshStore('alreadyrefunded'), executor);
+    // Under the auto-approve ceiling, truthfully declared, against a counterparty with
+    // history. Nothing in the request or the agent's account is wrong.
+    const proposal = await warden.submit(refund({ declaredAmount: { value: 20, currency: 'USD' } }));
+
+    assert.equal(proposal.mismatches.length, 0);
+    assert.equal(proposal.verification.status, 'contradicted');
+    assert.equal(proposal.verification.resourceState, 'REFUNDED');
+    assert.equal(proposal.status, 'pending');
+    assert.equal(executor.calls.length, 0);
+  });
+
+  test('a partly refunded capture is an unknown, not a refusal', async () => {
+    // PayPal does allow another refund here; it just will not say how much is left.
+    // Warden must neither block a legitimate action nor bound it on a number it does
+    // not have.
+    const executor = new StubExecutor('succeed', captureOf('20.00', 'PARTIALLY_REFUNDED'));
+    const warden = new Warden(freshStore('partialrefund'), executor);
+    const proposal = await warden.submit(refund({ declaredAmount: { value: 20, currency: 'USD' } }));
+
+    assert.equal(proposal.verification.status, 'unavailable');
+    assert.match(proposal.verification.error ?? '', /remainder/i);
+    assert.equal(proposal.status, 'pending');
+    assert.ok(proposal.policy.matchedRules.includes('guard:paypal-unreachable'));
+    assert.equal(executor.calls.length, 0);
   });
 
   test('a refund with no amount gets a real figure from PayPal, and a rule can then bound it', async () => {

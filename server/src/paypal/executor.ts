@@ -31,6 +31,24 @@ export const READ_ONLY_TOOLS = [
 
 export type ReadOnlyTool = (typeof READ_ONLY_TOOLS)[number];
 
+/**
+ * Reads the toolkit has no tool for, so Warden calls the REST API underneath it.
+ *
+ * `show_capture_details` is the one that matters. Warden has to know what a capture
+ * actually took before it lets a refund draw on it, and the toolkit exposes no way to
+ * ask. `list_transactions` is the obvious substitute and is the wrong tool for the job:
+ * PayPal's transaction search is not real-time, so a capture taken minutes ago is simply
+ * absent from it. `GET /v2/payments/captures/{id}` answers immediately, and answers more
+ * — the capture's own status says whether it has already been refunded, and the seller
+ * breakdown says what the merchant actually received after fees.
+ *
+ * These are GETs on payment resources. They move nothing.
+ */
+export const REST_READS = ['show_capture_details'] as const;
+
+const SANDBOX_API = 'https://api-m.sandbox.paypal.com';
+const LIVE_API = 'https://api-m.paypal.com';
+
 type ToolkitTool = {
   description: string;
   parameters: { safeParse: (v: unknown) => { success: boolean; error?: unknown } };
@@ -51,6 +69,7 @@ export interface Executor {
 
 export class PayPalExecutor implements Executor {
   private tools: Record<string, ToolkitTool> | undefined;
+  private token?: { value: string; expiresAt: number };
 
   constructor() {
     if (!paypalConfigured) return;
@@ -87,12 +106,68 @@ export class PayPalExecutor implements Executor {
 
   /** Read-only passthrough, for the agent and for Warden's own verification layer. */
   async read(name: string, params: unknown): Promise<unknown> {
+    if (REST_READS.includes(name as (typeof REST_READS)[number])) {
+      return this.restRead(name, params);
+    }
     if (!READ_ONLY_TOOLS.includes(name as ReadOnlyTool)) {
       throw new Error(`${name} is not a read-only tool`);
     }
     const tool = this.tools?.[name];
     if (!tool) throw new Error('PayPal credentials are not configured, so nothing can be read.');
     return assertSucceeded(normalize(await tool.execute(params)));
+  }
+
+  /** An OAuth token, reused until shortly before PayPal stops honouring it. */
+  private async accessToken(): Promise<string> {
+    if (this.token && this.token.expiresAt > Date.now()) return this.token.value;
+    if (!paypalConfigured) {
+      throw new Error('PayPal credentials are not configured, so nothing can be read.');
+    }
+    const basic = Buffer.from(
+      `${config.paypal.clientId}:${config.paypal.clientSecret}`,
+    ).toString('base64');
+    const response = await fetch(`${this.baseUrl}/v1/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${basic}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+    const body = (await response.json()) as { access_token?: string; expires_in?: number };
+    if (!response.ok || !body.access_token) {
+      throw new Error(`PayPal refused to issue a token (HTTP ${response.status}).`);
+    }
+    // A minute of headroom, so a token never expires mid-lookup.
+    this.token = {
+      value: body.access_token,
+      expiresAt: Date.now() + Math.max(0, (body.expires_in ?? 600) - 60) * 1000,
+    };
+    return this.token.value;
+  }
+
+  private get baseUrl(): string {
+    return config.paypal.sandbox ? SANDBOX_API : LIVE_API;
+  }
+
+  private async restRead(name: string, params: unknown): Promise<unknown> {
+    const id = (params as { id?: unknown })?.id;
+    if (typeof id !== 'string' || id.length === 0) throw new Error(`${name} needs an id.`);
+    // Path-segment only; an id that could escape the path is refused rather than sent.
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`${id} is not a PayPal resource id.`);
+
+    const response = await fetch(`${this.baseUrl}/v2/payments/captures/${id}`, {
+      headers: { authorization: `Bearer ${await this.accessToken()}` },
+    });
+    const body = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      const detail = (body as { name?: string; message?: string }) ?? {};
+      throw new PayPalCallFailed(
+        [detail.name, detail.message, `HTTP ${response.status}`].filter(Boolean).join(' \u2014 '),
+        body,
+      );
+    }
+    return body;
   }
 
   /**

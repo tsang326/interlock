@@ -49,8 +49,6 @@ export type Verification = {
 
 export const NOT_CHECKED: Verification = { status: 'not_applicable', findings: [] };
 
-/** PayPal's transaction search will not look further back than this in one query. */
-const SEARCH_WINDOW_DAYS = 31;
 const LOOKUP_TIMEOUT_MS = 8000;
 
 function money(source: unknown): Money | undefined {
@@ -135,16 +133,10 @@ function planLookup(kind: ActionKind, params: Record<string, unknown>): Lookup |
     case 'create_refund': {
       const captureId = str(params, 'capture_id');
       if (!captureId) return undefined;
-      const end = new Date();
-      const start = new Date(end.getTime() - SEARCH_WINDOW_DAYS * 24 * 3600 * 1000);
       return {
-        tool: 'list_transactions',
-        params: {
-          transaction_id: captureId,
-          start_date: start.toISOString(),
-          end_date: end.toISOString(),
-        },
-        source: `list_transactions(${captureId})`,
+        tool: 'show_capture_details',
+        params: { id: captureId },
+        source: `show_capture_details(${captureId})`,
         interpret: (answer, facts) => interpretCapture(answer, facts, captureId),
       };
     }
@@ -194,67 +186,93 @@ function planLookup(kind: ActionKind, params: Record<string, unknown>): Lookup |
 }
 
 /**
- * The headline case. A refund request either names an amount or does not; either way
- * the capture it draws on is already in PayPal, and its size settles both the unknown
- * and the overdraw.
+ * The headline case. A refund request either names an amount or does not; either way the
+ * capture it draws on is already in PayPal, and the capture answers three questions the
+ * request cannot: how much was taken, whether it has been refunded already, and what the
+ * merchant actually kept after fees.
  */
 function interpretCapture(answer: unknown, facts: DerivedFacts, captureId: string): Verification {
-  const rows = at(answer, 'transaction_details');
-  const row = Array.isArray(rows) ? rows[0] : undefined;
-  if (!row) {
-    return {
-      status: 'unavailable',
-      source: `list_transactions(${captureId})`,
-      findings: [],
-      error: `No transaction ${captureId} in the last ${SEARCH_WINDOW_DAYS} days of history. PayPal's transaction search does not look further back in one query, so this is not evidence that the capture does not exist.`,
-    };
-  }
-
-  const info = at(row, 'transaction_info');
-  const captured = money(at(info, 'transaction_amount'));
-  const state = str(info, 'transaction_status');
+  const source = `show_capture_details(${captureId})`;
+  const captured = money(at(answer, 'amount'));
+  const state = str(answer, 'status');
   const findings: string[] = [];
 
   if (!captured) {
     return {
       status: 'unavailable',
-      source: `list_transactions(${captureId})`,
+      source,
       resourceState: state,
       findings,
-      error: 'PayPal returned the transaction without a readable amount.',
+      error: 'PayPal returned the capture without a readable amount.',
     };
   }
 
-  // Captures are positive to the merchant; refunds against them come back negative.
-  const gross = Math.abs(captured.value);
-  const capture: Money = { value: gross, currency: captured.currency };
-
+  const capture: Money = { value: captured.value, currency: captured.currency };
   const requested = facts.amountStatus === 'derived' ? facts.amount : undefined;
-  if (!requested) {
+
+  // The gross is what a refund draws on, but it is not what the merchant received: the
+  // fee is already gone. Refunding in full costs more than the sale brought in, and a
+  // reviewer deciding on the gross alone would not know that.
+  const net = money(at(answer, 'seller_receivable_breakdown', 'net_amount'));
+  const fee = money(at(answer, 'seller_receivable_breakdown', 'paypal_fee'));
+  if (net && fee && fee.value > 0) {
     findings.push(
-      `The request names no amount, so PayPal would refund the whole capture: ${gross.toFixed(2)} ${capture.currency}.`,
+      `The merchant received ${net.value.toFixed(2)} ${net.currency} of this, after a ${fee.value.toFixed(2)} ${fee.currency} PayPal fee.`,
     );
-    return { status: 'confirmed', source: `list_transactions(${captureId})`, amount: capture, resourceState: state, findings };
   }
 
-  if (requested.currency !== capture.currency) {
+  // A capture PayPal considers fully refunded has nothing left to give back, and an
+  // agent asking is either looping or working from stale state.
+  if (state && /^REFUNDED$/i.test(state)) {
+    findings.push(`PayPal already holds this capture as fully refunded.`);
+    return { status: 'contradicted', source, amount: capture, resourceState: state, findings };
+  }
+
+  // Over the capture is wrong whatever its state, so that is checked before anything
+  // that depends on knowing the remainder.
+  if (requested && requested.currency !== capture.currency) {
     findings.push(
       `The refund is in ${requested.currency} but the capture was taken in ${capture.currency}.`,
     );
-    return { status: 'contradicted', source: `list_transactions(${captureId})`, amount: capture, resourceState: state, findings };
+    return { status: 'contradicted', source, amount: capture, resourceState: state, findings };
+  }
+  if (requested && requested.value > capture.value + 0.01) {
+    findings.push(
+      `The refund asks for ${requested.value.toFixed(2)} ${requested.currency} against a capture of ${capture.value.toFixed(2)} ${capture.currency} — more than was ever taken.`,
+    );
+    return { status: 'contradicted', source, amount: capture, resourceState: state, findings };
   }
 
-  if (requested.value > gross + 0.01) {
+  // Part of this capture is already back with the buyer. PayPal does allow another
+  // refund against it, but the response does not say how much is left, so the ceiling
+  // is known and the headroom is not. That is an unknown, and unknowns wait for a human.
+  if (state && /^PARTIALLY_REFUNDED$/i.test(state)) {
+    findings.push(`PayPal has already refunded part of this capture.`);
+    return {
+      status: 'unavailable',
+      source,
+      resourceState: state,
+      findings,
+      error: `The capture took ${capture.value.toFixed(2)} ${capture.currency} and part of it is already refunded. PayPal does not report the remainder here, so how much is still refundable cannot be established.`,
+    };
+  }
+
+  if (state && !/^COMPLETED$/i.test(state)) {
+    findings.push(`PayPal holds this capture as ${state}, which is not a state a refund can draw on.`);
+    return { status: 'contradicted', source, amount: capture, resourceState: state, findings };
+  }
+
+  if (!requested) {
     findings.push(
-      `The refund asks for ${requested.value.toFixed(2)} ${requested.currency} against a capture of ${gross.toFixed(2)} ${capture.currency} — more than was ever taken.`,
+      `The request names no amount, so PayPal would refund the whole capture: ${capture.value.toFixed(2)} ${capture.currency}.`,
     );
-    return { status: 'contradicted', source: `list_transactions(${captureId})`, amount: capture, resourceState: state, findings };
+    return { status: 'confirmed', source, amount: capture, resourceState: state, findings };
   }
 
   findings.push(
-    `PayPal confirms a capture of ${gross.toFixed(2)} ${capture.currency}; the refund is within it.`,
+    `PayPal confirms a capture of ${capture.value.toFixed(2)} ${capture.currency}; the refund is within it.`,
   );
-  return { status: 'confirmed', source: `list_transactions(${captureId})`, amount: capture, resourceState: state, findings };
+  return { status: 'confirmed', source, amount: capture, resourceState: state, findings };
 }
 
 /** Conceding a dispute forfeits whatever PayPal says the dispute is worth. */

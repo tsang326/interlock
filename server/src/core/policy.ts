@@ -35,9 +35,9 @@ export const DEFAULT_RULES: Rule[] = [
     name: 'Refund burst',
     enabled: true,
     priority: 10,
-    when: { kinds: ['create_refund'], velocity: { countGte: 3, windowMinutes: 10 } },
+    when: { kinds: ['create_refund'], velocity: { countGte: 5, windowMinutes: 10 } },
     then: 'block',
-    reason: 'More than 3 refunds proposed in 10 minutes. A loop or a hijacked agent looks like this.',
+    reason: 'Five or more refunds proposed in 10 minutes. A loop or a hijacked agent looks like this.',
   },
   {
     id: 'review-dispute-concession',
@@ -189,15 +189,25 @@ function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyO
     };
   }
 
+  // Warden asked PayPal and got no answer. The request's own amount is a ceiling, not a
+  // proof: it cannot say the resource exists, is in a state the action can be applied
+  // to, or has anything left. Acting unattended on strictly less information than the
+  // design calls for is the same mistake as trusting the agent's word, one step removed.
+  if (subject.verification.status === 'unavailable') {
+    return {
+      decision: 'needs_review',
+      matchedRules: [...outcome.matchedRules, 'guard:paypal-unreachable'],
+      reason: `Held despite "${outcome.reason}" — PayPal could not confirm what this action touches. ${subject.verification.error ?? 'The lookup failed.'}`,
+    };
+  }
+
+  // Anything still without an amount was never checkable in the first place: PayPal
+  // answered, or there was nothing to ask, and the request carries no figure.
   if (effectiveAmount(subject.facts, subject.verification) === undefined) {
-    const why =
-      subject.verification.status === 'unavailable'
-        ? `The request does not carry it and PayPal could not be asked: ${subject.verification.error ?? 'the lookup failed'}`
-        : subject.facts.notes.join(' ');
     return {
       decision: 'needs_review',
       matchedRules: [...outcome.matchedRules, 'guard:unverifiable-amount'],
-      reason: `Held despite "${outcome.reason}" — the amount could not be established, so no amount rule can bound it. ${why}`,
+      reason: `Held despite "${outcome.reason}" — the amount could not be established, so no amount rule can bound it. ${subject.facts.notes.join(' ')}`,
     };
   }
 

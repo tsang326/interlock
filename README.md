@@ -107,7 +107,19 @@ all, and never could be:
 - `cancel_subscription` carries a subscription id. What it *bills* is in PayPal.
 - `send_invoice` carries an invoice id. The *total* is in PayPal.
 - `create_refund` may carry an amount — but whether that amount is more than was ever
-  captured is in PayPal.
+  captured, and whether the capture has been refunded already, is in PayPal.
+
+| the agent proposes | Warden asks PayPal | and learns |
+|---|---|---|
+| `create_refund` | `GET /v2/payments/captures/{id}` | what was captured, whether it is already refunded, what the merchant kept after fees |
+| `accept_dispute_claim` | `get_dispute` | the disputed amount and whether the seller can still respond |
+| `cancel_subscription`, `update_subscription` | `show_subscription_details` | the billing amount, and whether PayPal already cancelled it |
+| `send_invoice`, `cancel_sent_invoice`, `record_refund_for_invoice` | `get_invoice` | the total, the recipient, and the invoice's actual state |
+
+The first row is the one the toolkit cannot do. There is no tool for a capture, and
+`list_transactions` is the wrong substitute: PayPal's transaction search is not
+real-time, so a capture taken minutes ago is simply absent from it. Warden calls the REST
+endpoint underneath instead — a GET on a payment resource, which moves nothing.
 
 So Warden asks, at proposal time, before anything is scored or decided. A reviewer therefore sees
 three accounts of the same action side by side: what the agent **stated**, what the request
@@ -122,7 +134,10 @@ draws on, an invoice sent twice, a subscription cancelled that PayPal already ca
 Three things the verification layer never does:
 
 - **Speak for PayPal when PayPal did not answer.** A failed lookup is `unavailable`, never
-  `confirmed`, and never a finding against the agent. Silence is recorded as unknown.
+  `confirmed`, and never a finding against the agent. Silence is recorded as unknown — and
+  an unknown cannot auto-approve, because the amount in the request is a ceiling, not a
+  proof that the resource exists, is in a state the action applies to, or has anything
+  left.
 - **Decide.** It reports; policy and the reviewer decide. A contradiction forces review, by the
   same guard outside the rule set.
 - **Hang a proposal.** Every lookup is bounded by a timeout.
@@ -219,12 +234,12 @@ labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the
 pnpm --filter @warden/server test
 ```
 
-25 tests, about a second, no network and no model — because a guarantee that needs a language
+27 tests, about a second, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
 running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
 being recorded as failed rather than executed, a refund larger than the capture it draws on being
-caught, a failed PayPal lookup never being read as a passed one, and the audit chain catching an
-edited and a deleted entry.
+caught, a capture PayPal has already refunded being refused, a failed PayPal lookup never being
+read as a passed one, and the audit chain catching an edited and a deleted entry.
 
 One test is named `KNOWN LIMIT` and asserts a weakness rather than a strength. It is below.
 
@@ -266,17 +281,16 @@ A security tool that oversells itself is worse than none, so:
 - **"Seen before" is earned cheaply.** A counterparty becomes familiar after any executed action,
   including a draft invoice, which is auto-approved. The ceiling on what that unlocks is low (a
   refund under 50) but it is not nothing.
-- **Verification depends on PayPal being reachable.** When a lookup fails the amount is treated as
-  unknown and the action is held, which is the safe direction, but it means an outage turns
-  routine work into a review queue. There is no caching and no retry.
-- **Transaction search looks back 31 days.** A refund against a capture older than that cannot be
-  confirmed in one query, so it is held rather than bounded. PayPal does not accept a wider window.
+- **Nothing runs unattended while PayPal is unreachable.** A failed lookup holds the action. That
+  is the safe direction and it is deliberate, but it means an outage turns routine work into a
+  review queue. There is no caching and no retry.
+- **A partly refunded capture cannot be bounded.** PayPal reports that a capture is
+  `PARTIALLY_REFUNDED` but not how much of it is left, so Warden knows the ceiling and not the
+  headroom. It holds those for a human rather than guessing, which is correct and also means a
+  legitimate second adjustment never runs unattended.
 - **`get_merchant_insights` is in the read set but the toolkit refuses it in sandbox**, so it is
   unavailable in the demo. It is left in the list because it is read-only at the API level; the
   sandbox restriction is the toolkit's, not Warden's.
-- **A capture is not checked for refunds already made against it.** The capture's size bounds a
-  refund; a second refund of the same capture would not be caught by this layer, only by the
-  velocity rule.
 - **No rate limiting**, deliberately, so the demo can be driven freely against the sandbox.
 - **The demo tokens are published above**, which is correct for a sandbox and obviously not for
   anything real.
@@ -287,8 +301,9 @@ A security tool that oversells itself is worse than none, so:
 
 - **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) against the sandbox — invoicing, payments,
   subscriptions, disputes and transaction search, used in both directions: the nine write actions
-  are what Warden gates, and `get_invoice`, `get_dispute`, `show_subscription_details` and
-  `list_transactions` are how it checks a proposal against PayPal's own record before deciding.
+  are what Warden gates, and `get_invoice`, `get_dispute` and `show_subscription_details` are how
+  it checks a proposal against PayPal's own record before deciding. Where the toolkit has no tool
+  — reading a capture — Warden calls the REST endpoint underneath it.
   Proposal parameters are validated against the toolkit's own schemas at proposal time, so a
   malformed request is refused while it is still cheap rather than at the moment money is meant to
   move.
