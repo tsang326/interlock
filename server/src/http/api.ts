@@ -1,0 +1,206 @@
+import cors from 'cors';
+import express, { type Request, type Response } from 'express';
+import { z } from 'zod';
+import { anthropicConfigured, config, paypalConfigured } from '../config.js';
+import type { Store } from '../core/db.js';
+import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
+import { InvalidTransition, SchemaRejection, type Warden } from '../core/warden.js';
+import { READ_ONLY_TOOLS, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
+
+const STATUSES: ProposalStatus[] = [
+  'pending',
+  'approved',
+  'rejected',
+  'blocked',
+  'executed',
+  'failed',
+  'expired',
+];
+
+const ProposalBody = z.object({
+  kind: z.enum(ACTION_KINDS),
+  params: z.record(z.string(), z.unknown()),
+  rationale: z.string().min(1).max(4000),
+  sessionId: z.string().min(1).max(64),
+  // The agent's own account of the action. Recorded and shown; never used to decide.
+  declaredAmount: z.object({ value: z.number(), currency: z.string().length(3) }).optional(),
+  declaredCounterparty: z.string().max(200).optional(),
+});
+
+const DecisionBody = z.object({
+  by: z.string().min(1).max(80),
+  note: z.string().max(1000).optional(),
+});
+
+const RuleBody = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(120),
+  enabled: z.boolean(),
+  priority: z.number().int().min(0).max(1000),
+  when: z.object({
+    kinds: z.array(z.enum(ACTION_KINDS)).optional(),
+    amountGte: z.number().optional(),
+    amountLt: z.number().optional(),
+    currency: z.string().length(3).optional(),
+    counterpartyUnseen: z.boolean().optional(),
+    riskScoreGte: z.number().min(0).max(100).optional(),
+    velocity: z.object({ countGte: z.number().int().min(1), windowMinutes: z.number().int().min(1) }).optional(),
+  }),
+  then: z.enum(['auto_approve', 'needs_review', 'block']),
+  reason: z.string().min(1).max(500),
+});
+
+/** Turns a thrown error into the right status code instead of a blanket 500. */
+function fail(res: Response, error: unknown): void {
+  if (error instanceof SchemaRejection) {
+    res.status(422).json({ error: 'schema_rejected', detail: error.detail });
+    return;
+  }
+  if (error instanceof InvalidTransition) {
+    res.status(409).json({ error: 'invalid_transition', detail: error.message });
+    return;
+  }
+  res.status(500).json({ error: 'internal', detail: error instanceof Error ? error.message : String(error) });
+}
+
+export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) {
+  const app = express();
+  app.use(cors());
+  app.use(express.json({ limit: '1mb' }));
+
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      paypal: paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'live') : 'simulated',
+      riskModel: anthropicConfigured ? config.anthropic.model : null,
+      readOnlyTools: READ_ONLY_TOOLS.length,
+      gatedActions: ACTION_KINDS.length,
+      demoTamperAvailable: config.paypal.sandbox,
+    });
+  });
+
+  /* ---- proposals ---- */
+
+  app.get('/api/proposals', (req, res) => {
+    const status = req.query.status as ProposalStatus | undefined;
+    if (status && !STATUSES.includes(status)) {
+      res.status(400).json({ error: 'bad_status', detail: `Unknown status ${status}` });
+      return;
+    }
+    const proposals = store.listProposals({ status, limit: 500 });
+    res.json(
+      proposals.map((p) => ({ ...p, resourceRef: p.result ? resourceRef(p.result) : undefined })),
+    );
+  });
+
+  app.get('/api/proposals/:id', (req, res) => {
+    const proposal = store.getProposal(req.params.id);
+    if (!proposal) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.json({ ...proposal, resourceRef: proposal.result ? resourceRef(proposal.result) : undefined });
+  });
+
+  app.post('/api/proposals', async (req, res) => {
+    const parsed = ProposalBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
+      return;
+    }
+    try {
+      res.status(201).json(await warden.submit(parsed.data));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  app.post('/api/proposals/:id/approve', async (req, res) => {
+    const parsed = DecisionBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
+      return;
+    }
+    try {
+      res.json(await warden.approve(req.params.id, parsed.data.by, parsed.data.note));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  app.post('/api/proposals/:id/reject', (req, res) => {
+    const parsed = DecisionBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
+      return;
+    }
+    try {
+      res.json(warden.reject(req.params.id, parsed.data.by, parsed.data.note));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /* ---- rules ---- */
+
+  app.get('/api/rules', (_req, res) => res.json(store.listRules()));
+
+  app.put('/api/rules/:id', (req, res) => {
+    const parsed = RuleBody.safeParse({ ...req.body, id: req.params.id });
+    if (!parsed.success) {
+      res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
+      return;
+    }
+    store.upsertRule(parsed.data);
+    store.append('policy.updated', req.body.by ?? 'console', { rule: parsed.data });
+    res.json(parsed.data);
+  });
+
+  /* ---- audit ---- */
+
+  app.get('/api/audit', (req, res) => {
+    const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
+    res.json(store.auditEntries(limit));
+  });
+
+  app.get('/api/audit/verify', (_req, res) => res.json(store.verifyChain()));
+
+  // Only ever offered against the sandbox: pointed at live PayPal, this endpoint is gone.
+  app.post('/api/audit/demo-tamper', (_req, res) => {
+    if (!config.paypal.sandbox) {
+      res.status(403).json({ error: 'demo_only', detail: 'Not available outside the sandbox.' });
+      return;
+    }
+    const edited = store.demoTamper();
+    if (!edited) {
+      res.status(409).json({ error: 'nothing_to_tamper', detail: 'The log needs at least two entries.' });
+      return;
+    }
+    res.json({ edited, verification: store.verifyChain() });
+  });
+
+  /* ---- live updates ---- */
+
+  app.get('/api/events', (req: Request, res: Response) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(': connected\n\n');
+
+    const unsubscribe = warden.subscribe((event) => {
+      res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.proposal ?? {})}\n\n`);
+    });
+    // Proxies drop idle streams; a comment every 25s is cheap and keeps it open.
+    const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+
+    req.on('close', () => {
+      clearInterval(ping);
+      unsubscribe();
+    });
+  });
+
+  return app;
+}
