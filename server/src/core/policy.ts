@@ -1,5 +1,6 @@
 import type { DerivedFacts } from './derive.js';
 import type { Store } from './db.js';
+import { effectiveAmount, type Verification } from './verify.js';
 import type { ActionKind, PolicyOutcome, RiskAssessment, Rule, RuleCondition } from './types.js';
 
 /**
@@ -10,6 +11,12 @@ export type PolicyFacts = {
   kind: ActionKind;
   facts: DerivedFacts;
   mismatches: string[];
+  /**
+   * What PayPal says about the resource. A figure PayPal supplied is as binding as one
+   * read out of the request, so amount rules may run on it; a contradiction between the
+   * two is something neither the parameters nor the agent could have revealed.
+   */
+  verification: Verification;
 };
 
 /**
@@ -106,14 +113,18 @@ function conditionMatches(
 
   const { kind, facts } = subject;
 
+  // The request binds where it speaks; where it is silent, PayPal's own figure does.
+  // Neither is the agent's word for it, which is the only thing that is never used.
+  const amount = effectiveAmount(facts, subject.verification);
+
   if (when.kinds && !when.kinds.includes(kind)) return false;
-  if (when.currency && facts.amount?.currency !== when.currency) return false;
+  if (when.currency && amount?.currency !== when.currency) return false;
 
   if (when.amountGte !== undefined) {
-    if (facts.amount === undefined || facts.amount.value < when.amountGte) return false;
+    if (amount === undefined || amount.value < when.amountGte) return false;
   }
   if (when.amountLt !== undefined) {
-    if (facts.amount === undefined || facts.amount.value >= when.amountLt) return false;
+    if (amount === undefined || amount.value >= when.amountLt) return false;
   }
   if (when.riskScoreGte !== undefined && risk.score < when.riskScoreGte) return false;
 
@@ -169,11 +180,24 @@ function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyO
     };
   }
 
-  if (subject.facts.amountStatus !== 'derived') {
+  // PayPal disagreeing with the request outranks any rule that would let it through.
+  if (subject.verification.status === 'contradicted') {
+    return {
+      decision: 'needs_review',
+      matchedRules: [...outcome.matchedRules, 'guard:paypal-contradiction'],
+      reason: `Held despite "${outcome.reason}" — PayPal's own record contradicts the request. ${subject.verification.findings.join(' ')}`,
+    };
+  }
+
+  if (effectiveAmount(subject.facts, subject.verification) === undefined) {
+    const why =
+      subject.verification.status === 'unavailable'
+        ? `The request does not carry it and PayPal could not be asked: ${subject.verification.error ?? 'the lookup failed'}`
+        : subject.facts.notes.join(' ');
     return {
       decision: 'needs_review',
       matchedRules: [...outcome.matchedRules, 'guard:unverifiable-amount'],
-      reason: `Held despite "${outcome.reason}" — the amount cannot be read from the request, so no amount rule can bound it. ${subject.facts.notes.join(' ')}`,
+      reason: `Held despite "${outcome.reason}" — the amount could not be established, so no amount rule can bound it. ${why}`,
     };
   }
 

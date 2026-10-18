@@ -6,6 +6,7 @@ import { deriveFacts, findMismatches } from './derive.js';
 import { evaluatePolicy, type PolicyFacts } from './policy.js';
 import { assessRisk } from './risk.js';
 import type { Proposal, ProposalInput } from './types.js';
+import { verifyAgainstPayPal } from './verify.js';
 
 export class SchemaRejection extends Error {
   constructor(public readonly detail: string) {
@@ -55,7 +56,18 @@ export class Warden {
     // Everything downstream decides on these, never on what the agent said it was doing.
     const facts = deriveFacts(input.kind, input.params);
     const mismatches = findMismatches(facts, input.declaredAmount, input.declaredCounterparty);
-    const subject: PolicyFacts = { kind: input.kind, facts, mismatches };
+
+    // The request is not the whole truth. What a dispute is worth, what a subscription
+    // bills, how much a capture actually took — all of that is in PayPal, so ask it
+    // before anything is scored or decided.
+    const verification = await verifyAgainstPayPal(
+      input.kind,
+      input.params,
+      facts,
+      this.paypal,
+    );
+
+    const subject: PolicyFacts = { kind: input.kind, facts, mismatches, verification };
 
     const risk = await assessRisk(input, subject, this.store);
     const policy = evaluatePolicy(subject, risk, this.store);
@@ -71,6 +83,7 @@ export class Warden {
       counterpartyKind: facts.counterpartyKind,
       factNotes: facts.notes,
       mismatches,
+      verification,
       status:
         policy.decision === 'block'
           ? 'blocked'
@@ -92,6 +105,16 @@ export class Warden {
         counterparty: proposal.counterparty ?? null,
         declaredAmount: proposal.declaredAmount ?? null,
         mismatches: proposal.mismatches,
+        // What PayPal said at decision time, so the chain records the evidence the
+        // decision rested on and not merely the decision.
+        verification: {
+          status: verification.status,
+          source: verification.source ?? null,
+          amount: verification.amount ?? null,
+          resourceState: verification.resourceState ?? null,
+          findings: verification.findings,
+          error: verification.error ?? null,
+        },
         paramsHash: hashParams(proposal.params),
         riskScore: risk.score,
         decision: policy.decision,

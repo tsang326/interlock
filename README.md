@@ -54,10 +54,10 @@ and subscriptions, where the money leaves the merchant's own account.
    ┌──────────┐   proposes   ┌────────┴─────────┐   approved only   ┌─────────┐
    │  Agent   │ ───────────► │      Warden      │ ────────────────► │ PayPal  │
    │ (Claude) │              │  policy + review │                   │   API   │
-   └──────────┘              └────────┬─────────┘                   └─────────┘
-        │                             │
-        │  reads freely          ┌────┴────┐
-        └───────────────────────►│  holds  │  auto-approve · wait for a human · refuse
+   └──────────┘              └────────┬─────────┘ ◄──────────────── └─────────┘
+        │                             │            what PayPal         ▲
+        │  reads freely          ┌────┴────┐       actually holds      │
+        └───────────────────────►│  holds  │  auto-approve · human · refuse
           15 read-only tools     │  the    │
                                  │  keys   │──────► append-only, hash-chained audit log
                                  └─────────┘
@@ -67,7 +67,7 @@ Of the toolkit's 47 tools:
 
 | | |
 |---|---|
-| **15 read-only tools** | the agent calls directly — they return information and move nothing |
+| **15 read-only tools** | the agent calls them directly, and Warden calls them itself to check a proposal against PayPal's own record |
 | **9 money-moving actions** | the agent can only *propose*; Warden decides and executes |
 | **the remaining 23** | never wired up, so they are not reachable at all |
 
@@ -94,9 +94,38 @@ This is not theoretical. Two ways an agent gets money out without it:
    that treats "no amount" as "small" hands over the whole thing.
 
 Warden derives `9500` in the first case and `unverifiable` in the second. Both are held for a
-human. An unverifiable amount can never satisfy an auto-approve rule — not because a rule says so,
-but because a guard outside the rule set says so, since rules are editable from the console and
-this must not be.
+human. An amount nobody could establish can never satisfy an auto-approve rule — not because a
+rule says so, but because a guard outside the rule set says so, since rules are editable from the
+console and this must not be.
+
+### The third account: what PayPal itself says
+
+Reading the request harder solves only half the problem. Some facts are not in the request at
+all, and never could be:
+
+- `accept_dispute_claim` carries a dispute id. What the dispute is *worth* is in PayPal.
+- `cancel_subscription` carries a subscription id. What it *bills* is in PayPal.
+- `send_invoice` carries an invoice id. The *total* is in PayPal.
+- `create_refund` may carry an amount — but whether that amount is more than was ever
+  captured is in PayPal.
+
+So Warden asks, at proposal time, before anything is scored or decided. A reviewer therefore sees
+three accounts of the same action side by side: what the agent **stated**, what the request
+actually **does**, and what PayPal **holds**. Policy runs on the last two and never the first.
+
+This does two things at once. It turns "the amount cannot be known" into a figure a rule can
+bound — a refund with no amount stops being unbounded once PayPal says the capture was 4,200, and
+a small one can then run unattended on a fact rather than on a guess. And it catches a class of
+problem neither the parameters nor the agent could reveal: a refund larger than the capture it
+draws on, an invoice sent twice, a subscription cancelled that PayPal already cancelled.
+
+Three things the verification layer never does:
+
+- **Speak for PayPal when PayPal did not answer.** A failed lookup is `unavailable`, never
+  `confirmed`, and never a finding against the agent. Silence is recorded as unknown.
+- **Decide.** It reports; policy and the reviewer decide. A contradiction forces review, by the
+  same guard outside the rule set.
+- **Hang a proposal.** Every lookup is bounded by a timeout.
 
 ### Risk scoring is two layers, and they are shown separately
 
@@ -190,10 +219,12 @@ labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the
 pnpm --filter @warden/server test
 ```
 
-15 tests, about a second, no network and no model — because a guarantee that needs a language
+25 tests, about a second, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
-running unattended, a held proposal never reaching PayPal, a rejected PayPal call being recorded
-as failed rather than executed, and the audit chain catching an edited and a deleted entry.
+running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
+being recorded as failed rather than executed, a refund larger than the capture it draws on being
+caught, a failed PayPal lookup never being read as a passed one, and the audit chain catching an
+edited and a deleted entry.
 
 One test is named `KNOWN LIMIT` and asserts a weakness rather than a strength. It is below.
 
@@ -201,10 +232,13 @@ One test is named `KNOWN LIMIT` and asserts a weakness rather than a strength. I
 
 ## What a reviewer sees
 
-- **Review queue** — proposals ranked by risk, with the amount Warden read from the request and,
-  where they differ, what the agent claimed.
-- **Proposal detail** — the decision and the rule that produced it, both risk layers, the model's
-  reasoning, the parameters bound for PayPal, and the agent's rationale, labelled untrusted.
+- **Review queue** — proposals ranked by risk, with the figure the decision rests on: the amount
+  read from the request, or PayPal's own where the request was silent, and what the agent claimed
+  where that differs.
+- **Proposal detail** — the three accounts side by side (agent, request, PayPal) with the call
+  that was made named so it can be repeated by hand; the decision and the rule that produced it;
+  both risk layers; the model's reasoning; the parameters bound for PayPal; and the agent's
+  rationale, labelled untrusted.
 - **Policy** — the rules, in evaluation order, editable. Changing one is itself an audited event.
 - **Audit** — the chain, with each entry's link to the one before it, and a verifier that walks it
   from the first entry. In sandbox mode there is a button that edits a row directly in the
@@ -232,9 +266,17 @@ A security tool that oversells itself is worse than none, so:
 - **"Seen before" is earned cheaply.** A counterparty becomes familiar after any executed action,
   including a draft invoice, which is auto-approved. The ceiling on what that unlocks is low (a
   refund under 50) but it is not nothing.
-- **Amounts for subscriptions, disputes and invoice sends cannot be derived**, because the money
-  lives in PayPal rather than in the request. Warden marks these `unverifiable` and always asks a
-  human. This is correct but it means those actions never run unattended.
+- **Verification depends on PayPal being reachable.** When a lookup fails the amount is treated as
+  unknown and the action is held, which is the safe direction, but it means an outage turns
+  routine work into a review queue. There is no caching and no retry.
+- **Transaction search looks back 31 days.** A refund against a capture older than that cannot be
+  confirmed in one query, so it is held rather than bounded. PayPal does not accept a wider window.
+- **`get_merchant_insights` is in the read set but the toolkit refuses it in sandbox**, so it is
+  unavailable in the demo. It is left in the list because it is read-only at the API level; the
+  sandbox restriction is the toolkit's, not Warden's.
+- **A capture is not checked for refunds already made against it.** The capture's size bounds a
+  refund; a second refund of the same capture would not be caught by this layer, only by the
+  velocity rule.
 - **No rate limiting**, deliberately, so the demo can be driven freely against the sandbox.
 - **The demo tokens are published above**, which is correct for a sandbox and obviously not for
   anything real.
@@ -244,9 +286,12 @@ A security tool that oversells itself is worse than none, so:
 ## Built with
 
 - **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) against the sandbox — invoicing, payments,
-  subscriptions and disputes. Proposal parameters are validated against the toolkit's own schemas
-  at proposal time, so a malformed request is refused while it is still cheap rather than at the
-  moment money is meant to move.
+  subscriptions, disputes and transaction search, used in both directions: the nine write actions
+  are what Warden gates, and `get_invoice`, `get_dispute`, `show_subscription_details` and
+  `list_transactions` are how it checks a proposal against PayPal's own record before deciding.
+  Proposal parameters are validated against the toolkit's own schemas at proposal time, so a
+  malformed request is refused while it is still cheap rather than at the moment money is meant to
+  move.
 - **Claude Opus 5.5** via the Anthropic SDK, with structured outputs, for the risk layer.
 - **AG Grid Community** for the review queue, **React + Vite** for the console.
 - **TypeScript**, **Express**, **SQLite** (better-sqlite3), server-sent events for live updates.

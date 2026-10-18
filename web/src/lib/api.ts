@@ -27,6 +27,8 @@ export type Proposal = {
   counterpartyStatus: 'derived' | 'unverifiable';
   factNotes: string[];
   mismatches: string[];
+  /** What PayPal itself said about the resource, asked at proposal time. */
+  verification: Verification;
   status: ProposalStatus;
   risk: {
     score: number;
@@ -44,6 +46,15 @@ export type Proposal = {
   resourceRef?: string;
   error?: string;
   executedAt?: string;
+};
+
+export type Verification = {
+  status: 'confirmed' | 'contradicted' | 'unavailable' | 'not_applicable';
+  source?: string;
+  amount?: { value: number; currency: string };
+  resourceState?: string;
+  findings: string[];
+  error?: string;
 };
 
 export type Rule = {

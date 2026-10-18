@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   declared_counterparty TEXT,
   fact_notes    TEXT NOT NULL DEFAULT '[]',
   mismatches    TEXT NOT NULL DEFAULT '[]',
+  verification  TEXT NOT NULL DEFAULT '{"status":"not_applicable","findings":[]}',
   status        TEXT NOT NULL,
   risk          TEXT NOT NULL,
   policy        TEXT NOT NULL,
@@ -110,6 +111,7 @@ type ProposalRow = {
   declared_counterparty: string | null;
   fact_notes: string;
   mismatches: string;
+  verification: string;
   status: string;
   risk: string;
   policy: string;
@@ -144,6 +146,7 @@ function rowToProposal(r: ProposalRow): Proposal {
     declaredCounterparty: r.declared_counterparty ?? undefined,
     factNotes: JSON.parse(r.fact_notes),
     mismatches: JSON.parse(r.mismatches),
+    verification: JSON.parse(r.verification),
     status: r.status as ProposalStatus,
     risk: JSON.parse(r.risk),
     policy: JSON.parse(r.policy),
@@ -164,6 +167,25 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /**
+   * `CREATE TABLE IF NOT EXISTS` leaves an existing table alone, so a column added
+   * after someone already has a database would never appear. Each migration is a
+   * column add that is safe to attempt twice.
+   */
+  private migrate(): void {
+    const columns = new Set(
+      (this.db.prepare('PRAGMA table_info(proposals)').all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+    );
+    if (!columns.has('verification')) {
+      this.db.exec(
+        `ALTER TABLE proposals ADD COLUMN verification TEXT NOT NULL DEFAULT '{"status":"not_applicable","findings":[]}'`,
+      );
+    }
   }
 
   /* ---------- audit chain ---------- */
@@ -294,13 +316,13 @@ export class Store {
            amount_value, amount_currency, amount_status,
            counterparty, counterparty_status, counterparty_kind,
            declared_amount_value, declared_amount_currency, declared_counterparty,
-           fact_notes, mismatches, status, risk, policy
+           fact_notes, mismatches, verification, status, risk, policy
          ) VALUES (
            @id, @createdAt, @kind, @params, @rationale, @sessionId,
            @amountValue, @amountCurrency, @amountStatus,
            @counterparty, @counterpartyStatus, @counterpartyKind,
            @declaredAmountValue, @declaredAmountCurrency, @declaredCounterparty,
-           @factNotes, @mismatches, @status, @risk, @policy
+           @factNotes, @mismatches, @verification, @status, @risk, @policy
          )`,
       )
       .run({
@@ -321,6 +343,7 @@ export class Store {
         declaredCounterparty: p.declaredCounterparty ?? null,
         factNotes: JSON.stringify(p.factNotes),
         mismatches: JSON.stringify(p.mismatches),
+        verification: JSON.stringify(p.verification),
         status: p.status,
         risk: JSON.stringify(p.risk),
         policy: JSON.stringify(p.policy),

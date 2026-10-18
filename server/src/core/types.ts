@@ -6,6 +6,8 @@
  * refused outright. Every one of those transitions lands in the audit chain.
  */
 
+import type { Verification } from './verify.js';
+
 /** Money-moving actions an agent may propose. Read-only PayPal calls are not proposals. */
 export const ACTION_KINDS = [
   'create_refund',
@@ -98,6 +100,8 @@ export type Proposal = ProposalInput & {
   factNotes: string[];
   /** Gaps between what the agent said and what the parameters do. */
   mismatches: string[];
+  /** What PayPal itself says about the resource this action touches. */
+  verification: Verification;
   risk: RiskAssessment;
   policy: PolicyOutcome;
   decidedBy?: string;

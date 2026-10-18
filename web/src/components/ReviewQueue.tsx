@@ -52,26 +52,35 @@ function RiskCell({ data }: { data?: Proposal }) {
  * The centrepiece: what the agent said next to what the request actually does. Where the
  * two differ, the reviewer should not have to go looking for it.
  */
+const amountText = (m?: { value: number; currency: string }) =>
+  m ? `${m.value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${m.currency}` : null;
+
+/**
+ * The figure a reviewer acts on, and where it came from. The request binds where it
+ * speaks; where it is silent, PayPal's own record does; the agent's claim is shown only
+ * so the reviewer can see when it disagrees with either.
+ */
 function AmountCell({ data }: { data?: Proposal }) {
   if (!data) return null;
-  const derived = data.amount
-    ? `${data.amount.value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${data.amount.currency}`
-    : null;
-  const declared = data.declaredAmount
-    ? `${data.declaredAmount.value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${data.declaredAmount.currency}`
-    : null;
-  const conflicted = data.mismatches.length > 0;
+  const derived = amountText(data.amount);
+  const declared = amountText(data.declaredAmount);
+  const fromPayPal = amountText(data.verification.amount);
+  const contradicted = data.verification.status === 'contradicted';
+  const conflicted = data.mismatches.length > 0 || contradicted;
+
+  // At most one line of provenance, in the order that matters to a reviewer:
+  // PayPal disagreeing, then PayPal supplying what the request lacked, then the
+  // agent's claim where it differs from the request.
+  let note: string | undefined;
+  if (contradicted) note = `PayPal: ${fromPayPal ?? 'disagrees'} ✕`;
+  else if (!derived && fromPayPal) note = "PayPal's figure, not the agent's";
+  else if (declared && declared !== derived) note = `agent said ${declared}${conflicted ? ' ✕' : ''}`;
+  else if (!derived) note = data.verification.status === 'unavailable' ? 'PayPal could not confirm' : 'not in the request';
 
   return (
     <span className={`amount${conflicted ? ' conflict' : ''}`}>
-      <b>{derived ?? 'unverifiable'}</b>
-      {declared && declared !== derived && (
-        <small>
-          agent said {declared}
-          {conflicted ? ' ✕' : ''}
-        </small>
-      )}
-      {!derived && !declared && <small>not in the request</small>}
+      <b>{derived ?? fromPayPal ?? 'unverifiable'}</b>
+      {note && <small>{note}</small>}
     </span>
   );
 }
@@ -103,9 +112,11 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
       { field: 'kind', headerName: 'Action', width: 184, cellClass: 'mono' },
       {
         colId: 'amount',
-        headerName: 'Amount in the request',
+        headerName: 'Amount',
+        headerTooltip:
+          "What the decision rests on: the amount read from the request, or PayPal's own where the request was silent.",
         width: 198,
-        valueGetter: (p) => p.data?.amount?.value ?? null,
+        valueGetter: (p) => p.data?.amount?.value ?? p.data?.verification.amount?.value ?? null,
         cellRenderer: AmountCell,
       },
       {

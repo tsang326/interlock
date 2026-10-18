@@ -42,6 +42,11 @@ export interface Executor {
   readonly live: boolean;
   validate(name: string, params: unknown): { ok: true } | { ok: false; error: string };
   executeApproved(kind: ActionKind, params: unknown): Promise<unknown>;
+  /**
+   * A read-only call. Warden uses these to check a proposal against what PayPal
+   * actually holds, which is the only place some of the facts exist.
+   */
+  read(name: string, params: unknown): Promise<unknown>;
 }
 
 export class PayPalExecutor implements Executor {
@@ -80,13 +85,13 @@ export class PayPalExecutor implements Executor {
     return { ok: false, error: summarizeZodError(result.error) };
   }
 
-  /** Read-only passthrough for the agent. */
-  async read(name: ReadOnlyTool, params: unknown): Promise<unknown> {
-    if (!READ_ONLY_TOOLS.includes(name)) {
+  /** Read-only passthrough, for the agent and for Warden's own verification layer. */
+  async read(name: string, params: unknown): Promise<unknown> {
+    if (!READ_ONLY_TOOLS.includes(name as ReadOnlyTool)) {
       throw new Error(`${name} is not a read-only tool`);
     }
     const tool = this.tools?.[name];
-    if (!tool) return { simulated: true, note: 'PayPal credentials not configured', name };
+    if (!tool) throw new Error('PayPal credentials are not configured, so nothing can be read.');
     return assertSucceeded(normalize(await tool.execute(params)));
   }
 
@@ -128,15 +133,36 @@ export class PayPalCallFailed extends Error {
 }
 
 /**
- * The toolkit resolves rather than throws when PayPal rejects a call: a 404 comes back
- * as `{ok: false, status: 404, ...}`. Taking that for success would write "executed"
- * into the audit trail for money that never moved, which is the one lie this system
- * must not tell. Anything that is not plainly a success is raised.
+ * The toolkit never throws. Every tool call is wrapped in a `try/catch` that resolves
+ * with a JSON string, so a failure arrives looking like a return value. Taking one for
+ * success would write "executed" into the audit trail for money that never moved, which
+ * is the one lie this system must not tell.
+ *
+ * There are two shapes, and both must be caught:
+ *
+ *   `{ok: false, status, code, message}`   an HTTP error PayPal answered with
+ *   `{error: {message, type}}`             the catch-all: anything else that threw
+ *
+ * The second has no `ok` and no `status`, so a check for those alone passes it through.
+ * It covers a malformed payload, a connection that died before PayPal replied, and the
+ * toolkit's own internal guards — every failure that is not an HTTP response.
  */
-function assertSucceeded(result: unknown): unknown {
+export function assertSucceeded(result: unknown): unknown {
   if (!result || typeof result !== 'object') return result;
   const r = result as Record<string, unknown>;
 
+  // Shape two: a nested error object, with no success flag anywhere to contradict it.
+  const nested = r.error;
+  if (nested && typeof nested === 'object') {
+    const e = nested as Record<string, unknown>;
+    const detail = [e.type, e.message].filter((p) => typeof p === 'string').join(' — ');
+    throw new PayPalCallFailed(detail || 'The PayPal toolkit returned an error.', result);
+  }
+  if (typeof nested === 'string' && nested.length > 0) {
+    throw new PayPalCallFailed(nested, result);
+  }
+
+  // Shape one: an HTTP error PayPal itself answered with.
   const status = typeof r.status === 'number' ? r.status : undefined;
   const failed = r.ok === false || (status !== undefined && status >= 400);
   if (!failed) return result;

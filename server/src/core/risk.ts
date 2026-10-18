@@ -5,6 +5,7 @@ import { anthropicConfigured, config } from '../config.js';
 import type { Store } from './db.js';
 import type { PolicyFacts } from './policy.js';
 import type { ProposalInput, RiskAssessment } from './types.js';
+import { effectiveAmount } from './verify.js';
 
 /**
  * Two-layer scoring. The deterministic layer always runs and sets a floor that the
@@ -40,12 +41,29 @@ export function heuristicRisk(
     score += 35;
     factors.push('declaration_mismatch');
   }
-  if (subject.facts.amountStatus !== 'derived') {
-    score += 15;
-    factors.push('amount_unverifiable');
+  // PayPal's own record outranks both the request and the agent. A contradiction there
+  // is the one signal no amount of careful reading of the parameters could have found.
+  if (subject.verification.status === 'contradicted') {
+    score += 40;
+    factors.push('paypal_contradiction');
   }
 
-  const amount = subject.facts.amount?.value ?? 0;
+  const established = effectiveAmount(subject.facts, subject.verification);
+  if (!established) {
+    // Not knowing what an action is worth is itself the risk, whether that is because
+    // the request omits it or because PayPal could not be reached to settle it.
+    score += 15;
+    factors.push(
+      subject.verification.status === 'unavailable' ? 'amount_unconfirmed' : 'amount_unverifiable',
+    );
+  } else if (subject.facts.amountStatus !== 'derived') {
+    // The request was silent and PayPal answered. The figure is sound, but the agent
+    // filed an action whose size it never stated, which is worth a smaller nudge.
+    score += 5;
+    factors.push('amount_from_paypal_not_request');
+  }
+
+  const amount = established?.value ?? 0;
   if (amount >= 5000) {
     score += 30;
     factors.push('amount_very_large');
@@ -97,6 +115,21 @@ function containsInjectionMarkers(text: string): boolean {
   );
 }
 
+/** PayPal's own answer, rendered for the model. Not agent-supplied, so not untrusted. */
+function describeVerification(subject: PolicyFacts): string {
+  const v = subject.verification;
+  switch (v.status) {
+    case 'not_applicable':
+      return 'nothing to look up — this action creates the resource it describes.';
+    case 'unavailable':
+      return `could not be asked (${v.source ?? 'lookup'}): ${v.error ?? 'the call failed'}. Treat the amount as unknown, not as fine.`;
+    case 'contradicted':
+      return `CONTRADICTS THE REQUEST via ${v.source}. ${v.findings.join(' ')}`;
+    case 'confirmed':
+      return `${v.source} answered. ${v.findings.join(' ')}`;
+  }
+}
+
 const ModelAssessment = z.object({
   score: z.number().min(0).max(100).describe('0 = routine, 100 = certain loss of funds'),
   factors: z
@@ -141,10 +174,11 @@ export async function assessRisk(
           content: [
             `Action: ${input.kind}`,
             `Amount Warden read from the request: ${
-              subject.facts.amount
+              subject.facts.amountStatus === 'derived' && subject.facts.amount
                 ? `${subject.facts.amount.value} ${subject.facts.amount.currency}`
-                : `UNVERIFIABLE — ${subject.facts.notes.join(' ')}`
+                : `NOT IN THE REQUEST — ${subject.facts.notes.join(' ')}`
             }`,
+            `What PayPal itself says (authoritative, not agent-supplied): ${describeVerification(subject)}`,
             `Amount the agent claimed: ${
               input.declaredAmount
                 ? `${input.declaredAmount.value} ${input.declaredAmount.currency}`

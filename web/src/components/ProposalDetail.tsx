@@ -2,7 +2,18 @@ import { useState } from 'react';
 import type { Proposal } from '../lib/api';
 
 /** Factor codes that should stand out: they describe an attack, not just a risk. */
-const HOT = /inject|instruct|urgen|suppress|attack|pressure|mismatch|inconsist|suspicious/i;
+const HOT = /inject|instruct|urgen|suppress|attack|pressure|mismatch|inconsist|suspicious|contradict/i;
+
+const fmt = (m: { value: number; currency: string }) =>
+  `${m.value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${m.currency}`;
+
+/** What to print on the PayPal row when PayPal gave no figure. */
+const VERDICT: Record<Proposal['verification']['status'], string> = {
+  confirmed: 'confirmed, no amount',
+  contradicted: 'contradicts the request',
+  unavailable: 'could not be asked',
+  not_applicable: 'nothing to ask yet',
+};
 
 type Props = {
   proposal?: Proposal;
@@ -28,6 +39,8 @@ export function ProposalDetail({ proposal, busy, onApprove, onReject }: Props) {
 
   const decidable = proposal.status === 'pending';
   const band = proposal.risk.score >= 70 ? 'danger' : proposal.risk.score >= 40 ? 'warn' : 'ok';
+  const v = proposal.verification;
+  const contested = proposal.mismatches.length > 0 || v.status === 'contradicted';
 
   return (
     <aside className="drawer">
@@ -47,22 +60,24 @@ export function ProposalDetail({ proposal, busy, onApprove, onReject }: Props) {
         )}
       </div>
 
-      <h3>What the agent said, and what the request does</h3>
-      <div className={`callout ${proposal.mismatches.length > 0 ? 'danger' : 'ok'}`}>
+      <h3>Three accounts of the same action</h3>
+      <div className={`callout ${contested ? 'danger' : 'ok'}`}>
         <dl className="compare">
           <dt>Agent stated</dt>
           <dd>
             {proposal.declaredAmount
-              ? `${proposal.declaredAmount.value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${proposal.declaredAmount.currency}`
+              ? `${fmt(proposal.declaredAmount)}`
               : 'nothing'}
+            <span className="hint"> · never used to decide</span>
           </dd>
           <dt>Request moves</dt>
           <dd>
-            <b>
-              {proposal.amount
-                ? `${proposal.amount.value.toLocaleString(undefined, { minimumFractionDigits: 2 })} ${proposal.amount.currency}`
-                : 'cannot be determined'}
-            </b>
+            <b>{proposal.amount ? fmt(proposal.amount) : 'not in the parameters'}</b>
+          </dd>
+          <dt>PayPal says</dt>
+          <dd>
+            <b>{v.amount ? fmt(v.amount) : VERDICT[v.status]}</b>
+            {v.resourceState && <span className="hint"> · {v.resourceState}</span>}
           </dd>
         </dl>
         {proposal.mismatches.map((m) => (
@@ -70,16 +85,25 @@ export function ProposalDetail({ proposal, busy, onApprove, onReject }: Props) {
             {m}
           </div>
         ))}
+        {v.findings.map((f) => (
+          <div key={f} style={{ marginTop: 6 }}>
+            {v.status === 'contradicted' ? <b>{f}</b> : f}
+          </div>
+        ))}
         {proposal.factNotes.map((n) => (
           <div key={n} style={{ marginTop: 6, color: 'var(--muted)' }}>
             {n}
           </div>
         ))}
-        {proposal.mismatches.length === 0 && proposal.factNotes.length === 0 && (
-          <div style={{ color: 'var(--muted)' }}>
-            Warden read the amount out of the request and the agent's account matched it.
+        {v.error && (
+          <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+            PayPal could not be asked: {v.error} Silence is recorded as unknown, never as
+            approval.
           </div>
         )}
+        <div className="mono" style={{ marginTop: 8, color: 'var(--muted)', fontSize: 12 }}>
+          {v.source ? `checked with ${v.source}` : 'nothing to check against — this action creates the resource it describes'}
+        </div>
       </div>
 
       <h3>Risk {proposal.risk.score} / 100</h3>

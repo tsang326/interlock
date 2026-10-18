@@ -4,11 +4,11 @@
  * Run with: pnpm seed
  * Safe to re-run; it writes to whatever WARDEN_DB points at.
  */
-import { config } from './config.js';
+import { config, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
 import { SchemaRejection, Warden } from './core/warden.js';
-import { PayPalExecutor } from './paypal/executor.js';
+import { PayPalExecutor, resourceRef } from './paypal/executor.js';
 import type { ProposalInput } from './core/types.js';
 
 const CAPTURE = '1AB23456CD789012E';
@@ -137,12 +137,77 @@ const BURST: ProposalInput = {
   },
 };
 
+/**
+ * Two real invoices in the sandbox, so the verification layer has something real to be
+ * right about. The point of the demo is that Warden asks PayPal, which only means
+ * anything if PayPal has an answer.
+ */
+async function createRealInvoices(paypal: PayPalExecutor) {
+  const draft = async (value: string, name: string) => {
+    const result = await paypal.executeApproved('create_invoice', {
+      currency_code: 'USD',
+      note: 'warden-demo',
+      primary_recipients: [{ billing_info: { email_address: 'ap@northwind.example' } }],
+      items: [{ name, quantity: '1', unit_amount: { currency_code: 'USD', value } }],
+    });
+    // The toolkit returns a bare `href` for an invoice rather than an id field.
+    const id = resourceRef(result);
+    if (!id) throw new Error(`PayPal created an invoice without a usable id: ${JSON.stringify(result).slice(0, 200)}`);
+    return id;
+  };
+  return { big: await draft('1200.00', 'Retainer'), small: await draft('48.00', 'Overage') };
+}
+
+/** Scenarios that only exist when there is a live sandbox to check them against. */
+function liveScenario(invoices: { big: string; small: string }): typeof SCENARIO {
+  return [
+    {
+      // The request carries an invoice id and nothing else. The agent calls it small.
+      // Only PayPal knows it is 1,200, and only because Warden asks.
+      label: 'Agent calls an invoice send routine — PayPal holds it at 1,200',
+      input: {
+        kind: 'send_invoice',
+        sessionId: 'agent-billing-01',
+        rationale: 'Customer confirmed the PO. Small routine send, nothing unusual.',
+        declaredAmount: { value: 12, currency: 'USD' },
+        declaredCounterparty: 'ap@northwind.example',
+        params: { invoice_id: invoices.big, note: 'thanks-for-your-business' },
+      },
+    },
+    {
+      // Nothing in the parameters is wrong. The action is simply impossible, and the
+      // only way to know that is to ask PayPal what state the invoice is in.
+      label: 'Agent cancels an invoice that was never sent',
+      input: {
+        kind: 'cancel_sent_invoice',
+        sessionId: 'agent-billing-01',
+        rationale: 'Customer called to cancel the order, so withdrawing the invoice.',
+        declaredCounterparty: 'ap@northwind.example',
+        params: { invoice_id: invoices.small, note: 'order-cancelled' },
+      },
+    },
+  ];
+}
+
 async function main() {
   const store = new Store(config.dbFile);
   seedDefaultRules(store);
-  const warden = new Warden(store, new PayPalExecutor());
+  const paypal = new PayPalExecutor();
+  const warden = new Warden(store, paypal);
 
-  for (const { label, input } of SCENARIO) {
+  let scenario = SCENARIO;
+  if (paypalConfigured) {
+    try {
+      const invoices = await createRealInvoices(paypal);
+      console.log(`  created real sandbox invoices ${invoices.big} and ${invoices.small}\n`);
+      scenario = [...SCENARIO, ...liveScenario(invoices)];
+    } catch (error) {
+      // The rest of the demo stands on its own; it just has less to check against.
+      console.log(`  (could not create sandbox invoices: ${error instanceof Error ? error.message : error})\n`);
+    }
+  }
+
+  for (const { label, input } of scenario) {
     try {
       const proposal = await warden.submit(input);
       console.log(`  ${proposal.status.padEnd(9)} risk ${String(proposal.risk.score).padStart(3)}  ${label}`);
