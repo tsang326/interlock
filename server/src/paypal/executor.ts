@@ -46,6 +46,13 @@ export type ReadOnlyTool = (typeof READ_ONLY_TOOLS)[number];
  */
 export const REST_READS = ['show_capture_details'] as const;
 
+/**
+ * Everything the agent may read, whichever side of the toolkit it comes from. Warden
+ * had no business knowing what a capture is worth while refusing to let the agent ask
+ * the same question: an agent that cannot see a capture guesses at it instead.
+ */
+export const READABLE: readonly string[] = [...READ_ONLY_TOOLS, ...REST_READS];
+
 const SANDBOX_API = 'https://api-m.sandbox.paypal.com';
 const LIVE_API = 'https://api-m.paypal.com';
 
@@ -89,6 +96,9 @@ export class PayPalExecutor implements Executor {
   }
 
   describe(name: string): string | undefined {
+    if (name === 'show_capture_details') {
+      return 'Show a captured payment by its capture id. Returns what was captured, whether it has already been refunded, and what the merchant received after fees. Needs { id }. Use this rather than list_transactions to look up a payment: transaction search is not real-time and will not show a recent capture.';
+    }
     return this.tools?.[name]?.description?.trim();
   }
 

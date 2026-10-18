@@ -173,6 +173,19 @@ const BURST: ProposalInput = {
  * anything if PayPal has an answer.
  */
 async function createRealInvoices(paypal: PayPalExecutor) {
+  // Re-running the seed must not leave a trail of drafts in the sandbox, so the
+  // demo's own invoices are reused when they are already there.
+  const existing = (await paypal.read('list_invoices', { page: 1, page_size: 100 })) as {
+    items?: Array<{ id?: string; status?: string; detail?: { note?: string }; amount?: { value?: string } }>;
+  };
+  const mine = (existing.items ?? []).filter(
+    (i) => i.detail?.note === 'warden-demo' && i.status === 'DRAFT',
+  );
+  const bySize = (value: string) => mine.find((i) => i.amount?.value === value)?.id;
+  const reusedBig = bySize('1200.00');
+  const reusedSmall = bySize('48.00');
+  if (reusedBig && reusedSmall) return { big: reusedBig, small: reusedSmall, reused: true };
+
   const draft = async (value: string, name: string) => {
     const result = await paypal.executeApproved('create_invoice', {
       currency_code: 'USD',
@@ -185,7 +198,11 @@ async function createRealInvoices(paypal: PayPalExecutor) {
     if (!id) throw new Error(`PayPal created an invoice without a usable id: ${JSON.stringify(result).slice(0, 200)}`);
     return id;
   };
-  return { big: await draft('1200.00', 'Retainer'), small: await draft('48.00', 'Overage') };
+  return {
+    big: reusedBig ?? (await draft('1200.00', 'Retainer')),
+    small: reusedSmall ?? (await draft('48.00', 'Overage')),
+    reused: false,
+  };
 }
 
 /** Scenarios that only exist when there is a live sandbox to check them against. */
@@ -229,7 +246,9 @@ async function main() {
   if (paypalConfigured) {
     try {
       const invoices = await createRealInvoices(paypal);
-      console.log(`  created real sandbox invoices ${invoices.big} and ${invoices.small}\n`);
+      console.log(
+        `  ${invoices.reused ? 'reusing' : 'created'} real sandbox invoices ${invoices.big} and ${invoices.small}\n`,
+      );
       scenario = [...SCENARIO, ...liveScenario(invoices)];
     } catch (error) {
       // The rest of the demo stands on its own; it just has less to check against.

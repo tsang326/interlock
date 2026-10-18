@@ -494,6 +494,33 @@ describe('the agent cannot decide its own proposals', () => {
   const AGENT = { authorization: 'Bearer demo-agent-token' };
   const REVIEWER = { authorization: 'Bearer demo-reviewer-token' };
 
+  test('the read route refuses anything that is not a read, including by its real name', async () => {
+    const { base, close } = await serve();
+    try {
+      // `create_refund` is a real PayPal tool and a real Warden action kind. Naming it
+      // here must fail the same way as naming nonsense: reads and writes do not share
+      // a door.
+      for (const tool of ['create_refund', 'cancel_subscription', 'pay_order', 'not_a_tool']) {
+        const response = await fetch(`${base}/api/paypal/read`, {
+          method: 'POST',
+          headers: { ...AGENT, 'content-type': 'application/json' },
+          body: JSON.stringify({ tool, params: {} }),
+        });
+        assert.equal(response.status, 403, `${tool} should not be readable`);
+        assert.equal(((await response.json()) as { error: string }).error, 'not_readable');
+      }
+
+      const unauthenticated = await fetch(`${base}/api/paypal/read`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tool: 'list_invoices', params: {} }),
+      });
+      assert.equal(unauthenticated.status, 401);
+    } finally {
+      close();
+    }
+  });
+
   test('every route but health refuses an unauthenticated caller', async () => {
     const s = await serve();
     try {

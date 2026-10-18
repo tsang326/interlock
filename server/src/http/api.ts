@@ -5,7 +5,7 @@ import { anthropicConfigured, config, paypalConfigured, usingDemoTokens } from '
 import type { Store } from '../core/db.js';
 import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
 import { InvalidTransition, SchemaRejection, type Warden } from '../core/warden.js';
-import { READ_ONLY_TOOLS, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
+import { READABLE, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
 import { callerOf, requireRole } from './auth.js';
 
 const STATUSES: ProposalStatus[] = [
@@ -26,6 +26,11 @@ const ProposalBody = z.object({
   // The agent's own account of the action. Recorded and shown; never used to decide.
   declaredAmount: z.object({ value: z.number(), currency: z.string().length(3) }).optional(),
   declaredCounterparty: z.string().max(200).optional(),
+});
+
+const ReadBody = z.object({
+  tool: z.string().min(1).max(64),
+  params: z.record(z.string(), z.unknown()).default({}),
 });
 
 const DecisionBody = z.object({
@@ -73,11 +78,48 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       ok: true,
       paypal: paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'live') : 'simulated',
       riskModel: anthropicConfigured ? config.anthropic.model : null,
-      readOnlyTools: READ_ONLY_TOOLS.length,
+      readOnlyTools: READABLE.length,
       gatedActions: ACTION_KINDS.length,
       demoTamperAvailable: config.paypal.sandbox,
       usingDemoTokens,
     });
+  });
+
+  /* ---- reading PayPal ---- */
+
+  /**
+   * The agent's only way to see PayPal. Warden holds the credentials and makes the
+   * call; the agent gets the answer.
+   *
+   * The allow-list is the point. A caller naming `create_refund` here is refused in the
+   * same breath as one naming a tool that does not exist — this route cannot reach a
+   * write even if someone wires it up by mistake, because `executor.read` refuses
+   * anything outside the read set a second time.
+   */
+  app.post('/api/paypal/read', requireRole('agent', 'reviewer'), async (req, res) => {
+    const parsed = ReadBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'bad_request', detail: z.prettifyError(parsed.error) });
+      return;
+    }
+    const { tool, params } = parsed.data;
+    if (!READABLE.includes(tool)) {
+      res.status(403).json({
+        error: 'not_readable',
+        detail: `${tool} is not a read-only tool. Money-moving actions are filed as proposals, not called.`,
+        readable: READABLE,
+      });
+      return;
+    }
+    try {
+      res.json({ tool, result: await paypal.read(tool, params) });
+    } catch (error) {
+      // A PayPal refusal is the agent's problem to handle, not a Warden fault.
+      res.status(502).json({
+        error: 'paypal_refused',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   /* ---- proposals ---- */

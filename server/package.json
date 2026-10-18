@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "tsx src/seed.ts",
-    "test": "ANTHROPIC_API_KEY= tsx --test src/warden.test.ts"
+    "test": "ANTHROPIC_API_KEY= tsx --test src/warden.test.ts",
+    "agent": "tsx src/agent/cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

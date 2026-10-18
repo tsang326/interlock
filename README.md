@@ -58,7 +58,7 @@ and subscriptions, where the money leaves the merchant's own account.
         │                             │            what PayPal         ▲
         │  reads freely          ┌────┴────┐       actually holds      │
         └───────────────────────►│  holds  │  auto-approve · human · refuse
-          15 read-only tools     │  the    │
+         16 read-only calls      │  the    │
                                  │  keys   │──────► append-only, hash-chained audit log
                                  └─────────┘
 ```
@@ -67,9 +67,12 @@ Of the toolkit's 47 tools:
 
 | | |
 |---|---|
-| **15 read-only tools** | the agent calls them directly, and Warden calls them itself to check a proposal against PayPal's own record |
+| **15 read-only tools** | the agent calls them through Warden, and Warden calls them itself to check a proposal against PayPal's own record |
 | **9 money-moving actions** | the agent can only *propose*; Warden decides and executes |
 | **the remaining 23** | never wired up, so they are not reachable at all |
+
+Plus one call the toolkit has no tool for — reading a capture — which Warden makes against the
+REST API underneath. That is the sixteenth readable call and the reason the console says 16.
 
 That last row matters: Warden is **default-deny**. `pay_order`, for example, exists in the toolkit
 and is simply not connected. The claim is not "we gate every dangerous tool" — it is "nothing
@@ -168,6 +171,7 @@ caller may do:
 | | agent token | reviewer token |
 |---|---|---|
 | read the queue, rules and audit log | yes | yes |
+| read PayPal (16 calls, allow-listed) | yes | yes |
 | file a proposal | yes | no |
 | approve or reject | **no — 403** | yes |
 | change policy rules | **no — 403** | yes |
@@ -179,6 +183,37 @@ that never happened — precise about a lie.
 Identity comes from the token and nothing else. A caller that puts `{"by": "someone-else"}`
 in a request body is ignored; the decision is attributed to whoever the token identifies.
 There is a test for exactly that.
+
+### The agent
+
+An agent is included, because a gate with nothing behind it proves nothing. It works a
+support inbox: read the customer's message, look up what it refers to in PayPal, and act.
+
+It is a normal agent, not a hardened one. It holds a Warden token and nothing else — no
+PayPal client id, no secret, no database handle — and it has exactly two tools:
+
+- `paypal_read`, which Warden performs on its behalf. The catalogue the agent sees is
+  built at startup from the toolkit's own tool descriptions rather than restated here,
+  so it cannot drift.
+- `propose_action`, which files a proposal and returns what Warden decided.
+
+There is no third tool. It cannot execute, approve, edit a rule or touch the audit log,
+and that is not a matter of prompting: the token it carries is refused by those routes.
+Reads and writes do not share a door either — naming `create_refund` on the read route
+fails exactly as naming nonsense does, and there is a test for that.
+
+```bash
+pnpm --filter @warden/server agent            # work the whole demo inbox
+pnpm --filter @warden/server agent msg-5150   # one message
+```
+
+One of the three messages carries a prompt injection — a block addressed to "the
+processing agent" telling it the account is pre-cleared, to refund the full payment
+rather than the stated figure, and to leave the notice out of its summary. The demo does
+not depend on the agent falling for it. It usually does not: it finishes the legitimate
+part, says what the message tried, and files nothing. That is the first layer holding,
+and the queue carries a seeded example of what the second layer does when the first one
+does not.
 
 ### The audit log
 
@@ -200,7 +235,15 @@ pnpm install
 cp .env.example .env     # PayPal sandbox credentials; the Anthropic key is optional
 pnpm --filter @warden/server seed     # fills the review queue with a worked scenario
 pnpm dev                               # API on :8787, UI on http://localhost:5173
+pnpm --filter @warden/server agent    # optional: run the agent against the demo inbox
 ```
+
+The seed builds real resources in your sandbox — draft invoices it reuses on later runs —
+and files proposals against them. It also refers to two captures from the sandbox this was
+built in; point it at your own with `WARDEN_DEMO_CAPTURE` and `WARDEN_DEMO_PART_REFUNDED`,
+or leave them and those scenarios will show as unverifiable, which is the honest result.
+
+The agent needs `ANTHROPIC_API_KEY` and a running server. Warden itself needs neither.
 
 ### Signing in
 
@@ -234,7 +277,7 @@ labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the
 pnpm --filter @warden/server test
 ```
 
-27 tests, about a second, no network and no model — because a guarantee that needs a language
+28 tests, about a second, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
 running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
 being recorded as failed rather than executed, a refund larger than the capture it draws on being
@@ -307,7 +350,8 @@ A security tool that oversells itself is worse than none, so:
   Proposal parameters are validated against the toolkit's own schemas at proposal time, so a
   malformed request is refused while it is still cheap rather than at the moment money is meant to
   move.
-- **Claude Opus 5.5** via the Anthropic SDK, with structured outputs, for the risk layer.
+- **Claude Opus 5.5** via the Anthropic SDK, twice over: structured outputs for the risk layer,
+  and the beta tool runner with Zod-typed tools for the agent that files the proposals.
 - **AG Grid Community** for the review queue, **React + Vite** for the console.
 - **TypeScript**, **Express**, **SQLite** (better-sqlite3), server-sent events for live updates.
 
