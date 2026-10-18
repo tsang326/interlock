@@ -279,6 +279,27 @@ Get sandbox credentials from the [PayPal developer dashboard](https://developer.
 (Apps & Credentials → Sandbox). Without them Warden still runs; approved actions are simulated and
 labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the deterministic layer.
 
+### Deploying
+
+`render.yaml` deploys the whole thing as one Render service: the API serves the built
+console, so there is one origin and one URL. Create it from the dashboard with **New →
+Blueprint**, point it at this repo, and Render will prompt for the three secrets — the
+PayPal sandbox pair and the Anthropic key. Everything else is in the file.
+
+Two things about the free plan, both deliberate rather than hidden:
+
+- **There is no persistent disk**, so the database is rebuilt from the seed on every
+  restart, and the audit chain starts over with it. The chain's guarantee is about
+  tampering between entries, not about surviving a redeploy; anchoring it outside the
+  database is listed under [Known limits](#known-limits) and is not built. A paid
+  instance with a disk and `WARDEN_DB` pointed at it keeps the history.
+- **The service sleeps when idle** and takes a few seconds to wake, so the first request
+  after a quiet period is slow.
+
+The seed runs on boot only when the queue is empty, so a restart never duplicates the
+scenario and never disturbs a queue someone has been working in. Set
+`WARDEN_SEED_ON_BOOT=false` to leave a fresh database empty.
+
 ### Verify the claims without any credentials
 
 ```bash

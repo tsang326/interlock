@@ -1,0 +1,52 @@
+# One service: the API serves the console, so there is a single origin and a single URL.
+#
+# Create it from the Render dashboard with "New → Blueprint" and point it at this repo.
+# Everything below is set for you except the secrets, which Render will prompt for
+# because they are marked `sync: false` and are never written down here.
+services:
+  - type: web
+    name: warden
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: node server/dist/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+
+      # PayPal sandbox. Without these Warden still runs and approved actions are
+      # simulated and labelled as such, but nothing can be verified against PayPal.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_SANDBOX
+        value: 'true'
+
+      # The risk model and the agent. Without this the deterministic layer runs alone,
+      # every proposal is labelled rules-only, and the Agent tab says why it cannot run.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # Published demo credentials, so a judge can sign in. Change them and the README's
+      # sign-in table stops being true, so change both together.
+      - key: WARDEN_AGENT_TOKEN
+        value: demo-agent-token
+      - key: WARDEN_REVIEWER_TOKEN
+        value: demo-reviewer-token
+
+      # Captures in the sandbox this was built against. Point these at your own sandbox
+      # if you are running a copy; left unset, those scenarios show as unverifiable,
+      # which is the honest result rather than a broken one.
+      - key: WARDEN_DEMO_CAPTURE
+        value: 11F28618GB587605W
+      - key: WARDEN_DEMO_PART_REFUNDED
+        value: 9CG69063AL531292H
+
+      # The free plan has no persistent disk, so the database is rebuilt from the seed
+      # on every restart. That is fine for a demo and means the audit chain starts over
+      # with it; see "Deploying" in the README.
+      - key: WARDEN_DB
+        value: /tmp/warden.sqlite

@@ -236,12 +236,13 @@ function liveScenario(invoices: { big: string; small: string }): typeof SCENARIO
   ];
 }
 
-async function main() {
-  const store = new Store(config.dbFile);
-  seedDefaultRules(store);
-  const paypal = new PayPalExecutor();
-  const warden = new Warden(store, paypal);
-
+/**
+ * Builds the demo queue against a store that already exists.
+ *
+ * Exported because a fresh deployment needs this too: an empty queue demonstrates
+ * nothing, and a judge opening the URL should find the scenario already there.
+ */
+export async function seedDemo(store: Store, paypal: PayPalExecutor, warden: Warden): Promise<void> {
   let scenario = SCENARIO;
   if (paypalConfigured) {
     try {
@@ -276,7 +277,17 @@ async function main() {
   console.log(`\n  audit: ${chain.message}`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+async function main() {
+  const store = new Store(config.dbFile);
+  seedDefaultRules(store);
+  const paypal = new PayPalExecutor();
+  await seedDemo(store, paypal, new Warden(store, paypal));
+}
+
+// Only when run directly; importing this module must not seed anything.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
