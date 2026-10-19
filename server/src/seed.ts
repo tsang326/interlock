@@ -7,6 +7,7 @@
 import { config, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
+import { setModelLayerEnabled } from './core/risk.js';
 import { SchemaRejection, Warden } from './core/warden.js';
 import { PayPalExecutor, resourceRef } from './paypal/executor.js';
 import type { ProposalInput } from './core/types.js';
@@ -242,7 +243,22 @@ function liveScenario(invoices: { big: string; small: string }): typeof SCENARIO
  * Exported because a fresh deployment needs this too: an empty queue demonstrates
  * nothing, and a judge opening the URL should find the scenario already there.
  */
-export async function seedDemo(store: Store, paypal: PayPalExecutor, warden: Warden): Promise<void> {
+export async function seedDemo(
+  store: Store,
+  paypal: PayPalExecutor,
+  warden: Warden,
+  options: { useModel?: boolean } = {},
+): Promise<void> {
+  // Each proposal costs one model call when the model layer is on, and this files
+  // sixteen of them. Worth saying out loud rather than discovering on a bill.
+  const useModel = options.useModel ?? true;
+  setModelLayerEnabled(useModel);
+  console.log(
+    useModel
+      ? '  scoring with the model: 16 proposals, one model call each'
+      : '  rules only: no model calls',
+  );
+
   let scenario = SCENARIO;
   if (paypalConfigured) {
     try {
@@ -275,13 +291,19 @@ export async function seedDemo(store: Store, paypal: PayPalExecutor, warden: War
 
   const chain = store.verifyChain();
   console.log(`\n  audit: ${chain.message}`);
+
+  // Whatever is submitted after the seed — by the agent, or by hand — is scored live.
+  setModelLayerEnabled(true);
 }
 
 async function main() {
   const store = new Store(config.dbFile);
   seedDefaultRules(store);
   const paypal = new PayPalExecutor();
-  await seedDemo(store, paypal, new Warden(store, paypal));
+  // `pnpm seed --rules-only` rebuilds the queue without spending anything, which is
+  // what you want while changing the policy or the verification layer.
+  const useModel = !process.argv.includes('--rules-only');
+  await seedDemo(store, paypal, new Warden(store, paypal), { useModel });
 }
 
 // Only when run directly; importing this module must not seed anything.

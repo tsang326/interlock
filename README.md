@@ -300,6 +300,13 @@ The seed runs on boot only when the queue is empty, so a restart never duplicate
 scenario and never disturbs a queue someone has been working in. Set
 `WARDEN_SEED_ON_BOOT=false` to leave a fresh database empty.
 
+**The starting queue on a deployment is scored by the rules alone.** Without a disk it is
+rebuilt at every cold start, and scoring sixteen proposals with the model each time the
+service wakes would let anyone visiting the URL spend the model budget, with no ceiling.
+Everything filed after boot — every agent run, every proposal you file by hand — is scored
+by both layers as normal. `WARDEN_SEED_MODEL=true` scores the starting queue too, and
+costs sixteen model calls per cold start.
+
 ### Verify the claims without any credentials
 
 ```bash

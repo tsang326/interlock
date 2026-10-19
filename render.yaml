@@ -33,6 +33,15 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
+      # The free plan has no disk, so the queue is rebuilt at every cold start. Scoring
+      # it with the model would spend sixteen model calls each time the service wakes —
+      # which strangers visiting the URL would be triggering, without a ceiling. So the
+      # starting queue is scored by the rules alone. Everything filed after boot, which
+      # is every agent run, is scored by the model as normal. Set this to 'true' only if
+      # you want to pay for the starting queue too.
+      - key: WARDEN_SEED_MODEL
+        value: 'false'
+
       # Published demo credentials, so a judge can sign in. Change them and the README's
       # sign-in table stops being true, so change both together.
       - key: WARDEN_AGENT_TOKEN

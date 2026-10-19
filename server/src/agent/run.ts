@@ -54,7 +54,11 @@ export async function runAgent(
     model: config.anthropic.model,
     max_tokens: 8000,
     thinking: { type: 'adaptive' },
-    system: SYSTEM,
+    // Every turn resends the whole conversation, and the fixed part of it — the tool
+    // definitions and these instructions — is the largest thing in a short run. Marking
+    // the end of it caches everything before it, which on a four-turn run is most of
+    // what would otherwise be paid for four times.
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
     tools: agentTools(new WardenClient(), paypal),
     messages: [
       {

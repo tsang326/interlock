@@ -47,7 +47,12 @@ async function start(): Promise<void> {
   // duplicates the scenario, and never touches a queue someone has been working in.
   if (process.env.WARDEN_SEED_ON_BOOT !== 'false' && store.listProposals({ limit: 1 }).length === 0) {
     try {
-      await seedDemo(store, paypal, warden);
+      // Opt-in, not opt-out. Without a persistent disk this runs at every cold start,
+      // and a stranger refreshing the page must not be able to spend the model budget.
+      // Anything filed after boot — every agent run — is still scored by the model.
+      await seedDemo(store, paypal, warden, {
+        useModel: process.env.WARDEN_SEED_MODEL === 'true',
+      });
       console.log('  Seeded an empty database with the demo scenario.');
     } catch (error) {
       console.error('  Seeding failed; the queue starts empty.', error);
