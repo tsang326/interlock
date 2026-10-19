@@ -5,7 +5,7 @@
 # because they are marked `sync: false` and are never written down here.
 services:
   - type: web
-    name: warden
+    name: interlock
     runtime: node
     plan: free
     region: oregon
@@ -19,7 +19,7 @@ services:
       - key: NODE_VERSION
         value: 24.10.0
 
-      # PayPal sandbox. Without these Warden still runs and approved actions are
+      # PayPal sandbox. Without these Interlock still runs and approved actions are
       # simulated and labelled as such, but nothing can be verified against PayPal.
       - key: PAYPAL_CLIENT_ID
         sync: false
@@ -34,31 +34,38 @@ services:
         sync: false
 
       # The free plan has no disk, so the queue is rebuilt at every cold start. Scoring
-      # it with the model would spend sixteen model calls each time the service wakes —
+      # it with the model would spend one model call per proposal each time it wakes —
       # which strangers visiting the URL would be triggering, without a ceiling. So the
       # starting queue is scored by the rules alone. Everything filed after boot, which
       # is every agent run, is scored by the model as normal. Set this to 'true' only if
       # you want to pay for the starting queue too.
-      - key: WARDEN_SEED_MODEL
+      - key: INTERLOCK_SEED_MODEL
         value: 'false'
+
+      # An agent run is a multi-turn model conversation, and this URL and its tokens are
+      # both published. This is the ceiling on how many runs the service will start
+      # before it refuses, per process — so a cold start resets it, and a visitor cannot
+      # spend without a bound. Reads, decisions and the queue are unaffected.
+      - key: INTERLOCK_AGENT_RUN_BUDGET
+        value: '25'
 
       # Published demo credentials, so a judge can sign in. Change them and the README's
       # sign-in table stops being true, so change both together.
-      - key: WARDEN_AGENT_TOKEN
+      - key: INTERLOCK_AGENT_TOKEN
         value: demo-agent-token
-      - key: WARDEN_REVIEWER_TOKEN
+      - key: INTERLOCK_REVIEWER_TOKEN
         value: demo-reviewer-token
 
       # Captures in the sandbox this was built against. Point these at your own sandbox
       # if you are running a copy; left unset, those scenarios show as unverifiable,
       # which is the honest result rather than a broken one.
-      - key: WARDEN_DEMO_CAPTURE
+      - key: INTERLOCK_DEMO_CAPTURE
         value: 11F28618GB587605W
-      - key: WARDEN_DEMO_PART_REFUNDED
+      - key: INTERLOCK_DEMO_PART_REFUNDED
         value: 9CG69063AL531292H
 
       # The free plan has no persistent disk, so the database is rebuilt from the seed
       # on every restart. That is fine for a demo and means the audit chain starts over
       # with it; see "Deploying" in the README.
-      - key: WARDEN_DB
-        value: /tmp/warden.sqlite
+      - key: INTERLOCK_DB
+        value: /tmp/interlock.sqlite

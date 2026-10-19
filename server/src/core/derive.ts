@@ -236,7 +236,7 @@ export function findMismatches(
     }
   }
 
-  // A claim Warden cannot check is not a contradiction. It is already reflected in
+  // A claim Interlock cannot check is not a contradiction. It is already reflected in
   // `amountStatus`, scored once as `amount_unverifiable`, and it blocks auto-approval on
   // its own. Counting it here as well would double-charge it and cry wolf on routine work.
 

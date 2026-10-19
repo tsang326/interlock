@@ -4,7 +4,7 @@ import { api, runAgent, type AgentStep, type Task } from '../lib/api';
 /**
  * Watching the agent work.
  *
- * The queue shows what Warden decided; this shows who asked and why. A reviewer looking
+ * The queue shows what Interlock decided; this shows who asked and why. A reviewer looking
  * at a held refund should be able to see the customer message it came from, every PayPal
  * call the agent made on the way, and what the agent told the merchant afterwards.
  */
@@ -104,14 +104,14 @@ export function AgentPanel({ onProposals, onError }: Props) {
   return (
     <div className="scroll">
       <div className="hint" style={{ marginBottom: 10 }}>
-        The agent holds a Warden token and nothing else. It can read PayPal through Warden
+        The agent holds an Interlock token and nothing else. It can read PayPal through Interlock
         and file proposals; it cannot execute, approve or change a rule, because the routes
         that do those things refuse its token. Everything below is one run, live.
         {!available && (
           <>
             {' '}
             <b style={{ color: 'var(--warn)' }}>
-              No ANTHROPIC_API_KEY is set, so the agent cannot run. Warden itself does not
+              No ANTHROPIC_API_KEY is set, so the agent cannot run. Interlock itself does not
               need one.
             </b>
           </>
@@ -184,12 +184,12 @@ export function AgentPanel({ onProposals, onError }: Props) {
                   <div className="hint" style={{ marginTop: 8 }}>
                     Filed {proposalIds.length} proposal{proposalIds.length > 1 ? 's' : ''}:{' '}
                     <span className="mono">{proposalIds.join(', ')}</span>. They are in the
-                    review queue with whatever Warden decided.
+                    review queue with whatever Interlock decided.
                   </div>
                 )}
                 {summary && proposalIds.length === 0 && openId === task.id && (
                   <div className="hint" style={{ marginTop: 8 }}>
-                    The agent filed nothing, so Warden was never asked to decide anything.
+                    The agent filed nothing, so Interlock was never asked to decide anything.
                   </div>
                 )}
               </>

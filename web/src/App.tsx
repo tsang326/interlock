@@ -92,7 +92,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          Warden <span>approval layer for agent payments</span>
+          Interlock <span>approval layer for agent payments</span>
         </div>
         <div className="statusline">
           <div>
@@ -143,7 +143,7 @@ export default function App() {
           <div>
             <b>Sign in to review</b>
             <p>
-              Warden answers nothing without a token, and the token decides what you may do.
+              Interlock answers nothing without a token, and the token decides what you may do.
               An agent's token can file proposals but never approve them. The demo tokens are
               in the project README.
             </p>

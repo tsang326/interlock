@@ -186,7 +186,7 @@ export async function assessRisk(
           role: 'user',
           content: [
             `Action: ${input.kind}`,
-            `Amount Warden read from the request: ${
+            `Amount Interlock read from the request: ${
               subject.facts.amountStatus === 'derived' && subject.facts.amount
                 ? `${subject.facts.amount.value} ${subject.facts.amount.currency}`
                 : `NOT IN THE REQUEST — ${subject.facts.notes.join(' ')}`

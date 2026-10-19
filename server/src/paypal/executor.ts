@@ -3,7 +3,7 @@ import { config, paypalConfigured } from '../config.js';
 import type { ActionKind } from '../core/types.js';
 
 /**
- * The only module in Warden that can reach PayPal.
+ * The only module in Interlock that can reach PayPal.
  *
  * Reads are open to the agent: they return information and move nothing. Writes are
  * reachable only through `executeApproved`, which the HTTP layer calls after a
@@ -32,9 +32,9 @@ export const READ_ONLY_TOOLS = [
 export type ReadOnlyTool = (typeof READ_ONLY_TOOLS)[number];
 
 /**
- * Reads the toolkit has no tool for, so Warden calls the REST API underneath it.
+ * Reads the toolkit has no tool for, so Interlock calls the REST API underneath it.
  *
- * `show_capture_details` is the one that matters. Warden has to know what a capture
+ * `show_capture_details` is the one that matters. Interlock has to know what a capture
  * actually took before it lets a refund draw on it, and the toolkit exposes no way to
  * ask. `list_transactions` is the obvious substitute and is the wrong tool for the job:
  * PayPal's transaction search is not real-time, so a capture taken minutes ago is simply
@@ -47,7 +47,7 @@ export type ReadOnlyTool = (typeof READ_ONLY_TOOLS)[number];
 export const REST_READS = ['show_capture_details'] as const;
 
 /**
- * Everything the agent may read, whichever side of the toolkit it comes from. Warden
+ * Everything the agent may read, whichever side of the toolkit it comes from. Interlock
  * had no business knowing what a capture is worth while refusing to let the agent ask
  * the same question: an agent that cannot see a capture guesses at it instead.
  */
@@ -62,13 +62,13 @@ type ToolkitTool = {
   execute: (args: unknown) => Promise<unknown>;
 };
 
-/** What `Warden` needs. Lets the decision path be tested without touching PayPal. */
+/** What `Interlock` needs. Lets the decision path be tested without touching PayPal. */
 export interface Executor {
   readonly live: boolean;
   validate(name: string, params: unknown): { ok: true } | { ok: false; error: string };
   executeApproved(kind: ActionKind, params: unknown): Promise<unknown>;
   /**
-   * A read-only call. Warden uses these to check a proposal against what PayPal
+   * A read-only call. Interlock uses these to check a proposal against what PayPal
    * actually holds, which is the only place some of the facts exist.
    */
   read(name: string, params: unknown): Promise<unknown>;
@@ -114,7 +114,7 @@ export class PayPalExecutor implements Executor {
     return { ok: false, error: summarizeZodError(result.error) };
   }
 
-  /** Read-only passthrough, for the agent and for Warden's own verification layer. */
+  /** Read-only passthrough, for the agent and for Interlock's own verification layer. */
   async read(name: string, params: unknown): Promise<unknown> {
     if (REST_READS.includes(name as (typeof REST_READS)[number])) {
       return this.restRead(name, params);

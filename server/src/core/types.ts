@@ -1,5 +1,5 @@
 /**
- * Warden domain types.
+ * Interlock domain types.
  *
  * An agent never touches PayPal directly. It emits a Proposal; the policy engine
  * decides whether that proposal executes on its own, waits for a human, or is

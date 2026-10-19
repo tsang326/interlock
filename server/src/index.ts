@@ -5,7 +5,7 @@ import express from 'express';
 import { anthropicConfigured, config, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
-import { Warden } from './core/warden.js';
+import { Interlock } from './core/interlock.js';
 import { createApi } from './http/api.js';
 import { PayPalExecutor } from './paypal/executor.js';
 import { seedDemo } from './seed.js';
@@ -14,8 +14,8 @@ const store = new Store(config.dbFile);
 seedDefaultRules(store);
 
 const paypal = new PayPalExecutor();
-const warden = new Warden(store, paypal);
-const app = createApi(store, warden, paypal);
+const interlock = new Interlock(store, paypal);
+const app = createApi(store, interlock, paypal);
 
 /**
  * In production the API also serves the console, so the whole thing is one service and
@@ -45,13 +45,13 @@ async function start(): Promise<void> {
   // A fresh deployment starts with an empty database and would show an empty queue,
   // which demonstrates nothing. Seeding only when it is empty means a restart never
   // duplicates the scenario, and never touches a queue someone has been working in.
-  if (process.env.WARDEN_SEED_ON_BOOT !== 'false' && store.listProposals({ limit: 1 }).length === 0) {
+  if (process.env.INTERLOCK_SEED_ON_BOOT !== 'false' && store.listProposals({ limit: 1 }).length === 0) {
     try {
       // Opt-in, not opt-out. Without a persistent disk this runs at every cold start,
       // and a stranger refreshing the page must not be able to spend the model budget.
       // Anything filed after boot — every agent run — is still scored by the model.
-      await seedDemo(store, paypal, warden, {
-        useModel: process.env.WARDEN_SEED_MODEL === 'true',
+      await seedDemo(store, paypal, interlock, {
+        useModel: process.env.INTERLOCK_SEED_MODEL === 'true',
       });
       console.log('  Seeded an empty database with the demo scenario.');
     } catch (error) {
@@ -60,7 +60,7 @@ async function start(): Promise<void> {
   }
 
   app.listen(config.port, () => {
-    console.log(`Warden listening on :${config.port}`);
+    console.log(`Interlock listening on :${config.port}`);
     console.log(`  PayPal     ${paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'LIVE') : 'simulated'}`);
     console.log(`  Risk model ${anthropicConfigured ? config.anthropic.model : 'heuristics only'}`);
     console.log(`  Database   ${config.dbFile}`);

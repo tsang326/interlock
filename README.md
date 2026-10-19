@@ -1,9 +1,9 @@
-# Warden
+# Interlock
 
 **A human-in-the-loop approval and policy layer for AI agents that move money through PayPal.**
 
 An agent connected to PayPal's Agent Toolkit can issue refunds, cancel subscriptions, concede
-disputes and send invoices. Warden sits between the agent and that power: the agent may only
+disputes and send invoices. Interlock sits between the agent and that power: the agent may only
 *propose* an action, and a policy engine decides whether it runs on its own, waits for a person,
 or is refused. The server alone talks to PayPal, and every decision is appended to a
 tamper-evident log.
@@ -14,7 +14,7 @@ Built for the PayPal AI Hackathon, against the PayPal sandbox.
 
 ## Why this exists
 
-The Model Context Protocol specification (2025-11-25, *Security and Trust & Safety*) says both
+The Model Context Protocol specification (2026-07-28, *Security and Trust & Safety*) says both
 of these things:
 
 > Hosts must obtain explicit user consent before invoking any tool.
@@ -26,7 +26,7 @@ of these things:
 The same section adds that "descriptions of tool behavior such as annotations should be
 considered untrusted".
 
-Warden is built in the gap between those two sentences. PayPal's Agent Toolkit exposes 47 tools,
+Interlock is built in the gap between those two sentences. PayPal's Agent Toolkit exposes 47 tools,
 including `create_refund`, `cancel_subscription` and `accept_dispute_claim`. Its configuration can
 switch whole product areas on or off, but there is no per-action approval step for the merchant
 side. Meanwhile the PayPal Developer Agreement (§1.3, *App ID and API Credentials*) is explicit
@@ -52,7 +52,7 @@ and subscriptions, where the money leaves the merchant's own account.
                     the agent never holds PayPal credentials
                                       │
    ┌──────────┐   proposes   ┌────────┴─────────┐   approved only   ┌─────────┐
-   │  Agent   │ ───────────► │      Warden      │ ────────────────► │ PayPal  │
+   │  Agent   │ ───────────► │    Interlock     │ ────────────────► │ PayPal  │
    │ (Claude) │              │  policy + review │                   │   API   │
    └──────────┘              └────────┬─────────┘ ◄──────────────── └─────────┘
         │                             │            what PayPal         ▲
@@ -67,14 +67,14 @@ Of the toolkit's 47 tools:
 
 | | |
 |---|---|
-| **15 read-only tools** | the agent calls them through Warden, and Warden calls them itself to check a proposal against PayPal's own record |
-| **9 money-moving actions** | the agent can only *propose*; Warden decides and executes |
+| **15 read-only tools** | the agent calls them through Interlock, and Interlock calls them itself to check a proposal against PayPal's own record |
+| **9 money-moving actions** | the agent can only *propose*; Interlock decides and executes |
 | **the remaining 23** | never wired up, so they are not reachable at all |
 
-Plus one call the toolkit has no tool for — reading a capture — which Warden makes against the
+Plus one call the toolkit has no tool for — reading a capture — which Interlock makes against the
 REST API underneath. That is the sixteenth readable call and the reason the console says 16.
 
-That last row matters: Warden is **default-deny**. `pay_order`, for example, exists in the toolkit
+That last row matters: Interlock is **default-deny**. `pay_order`, for example, exists in the toolkit
 and is simply not connected. The claim is not "we gate every dangerous tool" — it is "nothing
 reaches PayPal except through one function, and that function runs only for a proposal that has
 already been decided."
@@ -84,7 +84,7 @@ already been decided."
 **Policy runs on facts read out of the request, never on the agent's account of itself.**
 
 When an agent files a proposal it may also state what the action is worth. That statement is
-displayed to the reviewer and recorded, and it is never used to decide anything. Warden derives
+displayed to the reviewer and recorded, and it is never used to decide anything. Interlock derives
 the amount and the target from `params` — the object that will actually reach PayPal — and policy
 sees only those.
 
@@ -96,7 +96,7 @@ This is not theoretical. Two ways an agent gets money out without it:
    amount refunds *the entire capture*. There is no number in the request to check, so a policy
    that treats "no amount" as "small" hands over the whole thing.
 
-Warden derives `9500` in the first case and `unverifiable` in the second. Both are held for a
+Interlock derives `9500` in the first case and `unverifiable` in the second. Both are held for a
 human. An amount nobody could establish can never satisfy an auto-approve rule — not because a
 rule says so, but because a guard outside the rule set says so, since rules are editable from the
 console and this must not be.
@@ -112,7 +112,7 @@ all, and never could be:
 - `create_refund` may carry an amount — but whether that amount is more than was ever
   captured, and whether the capture has been refunded already, is in PayPal.
 
-| the agent proposes | Warden asks PayPal | and learns |
+| the agent proposes | Interlock asks PayPal | and learns |
 |---|---|---|
 | `create_refund` | `GET /v2/payments/captures/{id}` | what was captured, whether it is already refunded, what the merchant kept after fees |
 | `accept_dispute_claim` | `get_dispute` | the disputed amount and whether the seller can still respond |
@@ -121,10 +121,10 @@ all, and never could be:
 
 The first row is the one the toolkit cannot do. There is no tool for a capture, and
 `list_transactions` is the wrong substitute: PayPal's transaction search is not
-real-time, so a capture taken minutes ago is simply absent from it. Warden calls the REST
+real-time, so a capture taken minutes ago is simply absent from it. Interlock calls the REST
 endpoint underneath instead — a GET on a payment resource, which moves nothing.
 
-So Warden asks, at proposal time, before anything is scored or decided. A reviewer therefore sees
+So Interlock asks, at proposal time, before anything is scored or decided. A reviewer therefore sees
 three accounts of the same action side by side: what the agent **stated**, what the request
 actually **does**, and what PayPal **holds**. Policy runs on the last two and never the first.
 
@@ -189,13 +189,13 @@ There is a test for exactly that.
 An agent is included, because a gate with nothing behind it proves nothing. It works a
 support inbox: read the customer's message, look up what it refers to in PayPal, and act.
 
-It is a normal agent, not a hardened one. It holds a Warden token and nothing else — no
+It is a normal agent, not a hardened one. It holds an Interlock token and nothing else — no
 PayPal client id, no secret, no database handle — and it has exactly two tools:
 
-- `paypal_read`, which Warden performs on its behalf. The catalogue the agent sees is
+- `paypal_read`, which Interlock performs on its behalf. The catalogue the agent sees is
   built at startup from the toolkit's own tool descriptions rather than restated here,
   so it cannot drift.
-- `propose_action`, which files a proposal and returns what Warden decided.
+- `propose_action`, which files a proposal and returns what Interlock decided.
 
 There is no third tool. It cannot execute, approve, edit a rule or touch the audit log,
 and that is not a matter of prompting: the token it carries is refused by those routes.
@@ -207,8 +207,8 @@ streaming as it happens — every PayPal call, the proposal, and what the agent 
 merchant afterwards. The same thing runs from a terminal:
 
 ```bash
-pnpm --filter @warden/server agent            # work the whole demo inbox
-pnpm --filter @warden/server agent msg-5150   # one message
+pnpm --filter @interlock/server agent            # work the whole demo inbox
+pnpm --filter @interlock/server agent msg-5150   # one message
 ```
 
 Starting a run from the console takes the reviewer's token, because starting it is an
@@ -241,17 +241,17 @@ Requires Node 24 and pnpm. (better-sqlite3 is a native module, so the Node versi
 ```bash
 pnpm install
 cp .env.example .env     # PayPal sandbox credentials; the Anthropic key is optional
-pnpm --filter @warden/server seed     # fills the review queue with a worked scenario
+pnpm --filter @interlock/server seed     # fills the review queue with a worked scenario
 pnpm dev                               # API on :8787, UI on http://localhost:5173
-pnpm --filter @warden/server agent    # optional: run the agent against the demo inbox
+pnpm --filter @interlock/server agent    # optional: run the agent against the demo inbox
 ```
 
 The seed builds real resources in your sandbox — draft invoices it reuses on later runs —
 and files proposals against them. It also refers to two captures from the sandbox this was
-built in; point it at your own with `WARDEN_DEMO_CAPTURE` and `WARDEN_DEMO_PART_REFUNDED`,
+built in; point it at your own with `INTERLOCK_DEMO_CAPTURE` and `INTERLOCK_DEMO_PART_REFUNDED`,
 or leave them and those scenarios will show as unverifiable, which is the honest result.
 
-The agent needs `ANTHROPIC_API_KEY` and a running server. Warden itself needs neither.
+The agent needs `ANTHROPIC_API_KEY` and a running server. Interlock itself needs neither.
 
 ### Signing in
 
@@ -264,8 +264,8 @@ The console asks for a token before it will show anything. Unless you set your o
 | agent | `demo-agent-token` | file proposals and read; refused with 403 if it tries to decide |
 
 These are published defaults for a sandbox demo and are not secrets. Set
-`WARDEN_AGENT_TOKEN` and `WARDEN_REVIEWER_TOKEN` to use your own, and
-`WARDEN_REQUIRE_TOKENS=true` to refuse to start without them.
+`INTERLOCK_AGENT_TOKEN` and `INTERLOCK_REVIEWER_TOKEN` to use your own, and
+`INTERLOCK_REQUIRE_TOKENS=true` to refuse to start without them.
 
 Try the boundary yourself:
 
@@ -276,7 +276,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 ```
 
 Get sandbox credentials from the [PayPal developer dashboard](https://developer.paypal.com/dashboard/)
-(Apps & Credentials → Sandbox). Without them Warden still runs; approved actions are simulated and
+(Apps & Credentials → Sandbox). Without them Interlock still runs; approved actions are simulated and
 labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the deterministic layer.
 
 ### Deploying
@@ -292,28 +292,39 @@ Two things about the free plan, both deliberate rather than hidden:
   restart, and the audit chain starts over with it. The chain's guarantee is about
   tampering between entries, not about surviving a redeploy; anchoring it outside the
   database is listed under [Known limits](#known-limits) and is not built. A paid
-  instance with a disk and `WARDEN_DB` pointed at it keeps the history.
+  instance with a disk and `INTERLOCK_DB` pointed at it keeps the history.
 - **The service sleeps when idle** and takes a few seconds to wake, so the first request
   after a quiet period is slow.
 
 The seed runs on boot only when the queue is empty, so a restart never duplicates the
 scenario and never disturbs a queue someone has been working in. Set
-`WARDEN_SEED_ON_BOOT=false` to leave a fresh database empty.
+`INTERLOCK_SEED_ON_BOOT=false` to leave a fresh database empty.
 
 **The starting queue on a deployment is scored by the rules alone.** Without a disk it is
-rebuilt at every cold start, and scoring sixteen proposals with the model each time the
+rebuilt at every cold start, and scoring every proposal in it with the model each time the
 service wakes would let anyone visiting the URL spend the model budget, with no ceiling.
 Everything filed after boot — every agent run, every proposal you file by hand — is scored
-by both layers as normal. `WARDEN_SEED_MODEL=true` scores the starting queue too, and
-costs sixteen model calls per cold start.
+by both layers as normal. `INTERLOCK_SEED_MODEL=true` scores the starting queue too, and
+costs one model call per proposal in that queue — fifteen against a live sandbox, thirteen
+without.
+
+**The agent has a run budget, for the same reason.** A run is a multi-turn model
+conversation, and both this URL and its tokens are published: without a ceiling, a visitor
+can spend the model budget, and a loop can spend it quickly. So the service starts at most
+`INTERLOCK_AGENT_RUN_BUDGET` runs (25 by default) and then refuses with a 429 that says what
+happened; it also runs one at a time, because the console disables the button during a run
+and `curl` does not. The count is per process, so a restart resets it. Nothing else is
+limited — reads, proposals and decisions are not metered and are left open. A refusal here
+is about cost, and the queue, the audit log and every run already made stay exactly as
+they were.
 
 ### Verify the claims without any credentials
 
 ```bash
-pnpm --filter @warden/server test
+pnpm --filter @interlock/server test
 ```
 
-28 tests, about a second, no network and no model — because a guarantee that needs a language
+32 tests, about a second and a half, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
 running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
 being recorded as failed rather than executed, a refund larger than the capture it draws on being
@@ -352,9 +363,10 @@ A security tool that oversells itself is worse than none, so:
   no rotation, no expiry and no second approver on large amounts. The audit log records which
   *role* decided, not which human.
 - **The event stream is unauthenticated.** `EventSource` cannot send headers, so `/api/events` is
-  open. It carries decision notifications only, and anything it reveals is already behind a
-  token-guarded read endpoint, but it is a gap worth naming. It is the only such route: the agent
-  run streams newline-delimited JSON over a normal fetch precisely so it can stay behind a token.
+  open. It carries a proposal id and its new status and nothing else, so reading it reveals
+  no more than knowing a decision happened, but it is a gap worth naming. It is the only
+  such route: the agent run streams newline-delimited JSON over a normal fetch precisely so
+  it can stay behind a token.
 - **Tamper-evident, not tamper-proof.** The hashes are unkeyed, so anyone who can write to the
   database can recompute the chain. Removing entries from the *end* leaves a shorter chain that
   still reconciles — nothing links forward. Anchoring the tip outside the database fixes both, and
@@ -368,13 +380,16 @@ A security tool that oversells itself is worse than none, so:
   is the safe direction and it is deliberate, but it means an outage turns routine work into a
   review queue. There is no caching and no retry.
 - **A partly refunded capture cannot be bounded.** PayPal reports that a capture is
-  `PARTIALLY_REFUNDED` but not how much of it is left, so Warden knows the ceiling and not the
+  `PARTIALLY_REFUNDED` but not how much of it is left, so Interlock knows the ceiling and not the
   headroom. It holds those for a human rather than guessing, which is correct and also means a
   legitimate second adjustment never runs unattended.
 - **`get_merchant_insights` is in the read set but the toolkit refuses it in sandbox**, so it is
   unavailable in the demo. It is left in the list because it is read-only at the API level; the
-  sandbox restriction is the toolkit's, not Warden's.
-- **No rate limiting**, deliberately, so the demo can be driven freely against the sandbox.
+  sandbox restriction is the toolkit's, not Interlock's.
+- **No rate limiting on anything except the agent.** Reads, proposals and decisions can be
+  driven freely against the sandbox, deliberately, because nothing there is metered. The agent
+  is, so it has a run budget and runs one at a time; see "Deploying". That is a spending
+  ceiling, not protection against a flood.
 - **The demo tokens are published above**, which is correct for a sandbox and obviously not for
   anything real.
 
@@ -384,9 +399,9 @@ A security tool that oversells itself is worse than none, so:
 
 - **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) against the sandbox — invoicing, payments,
   subscriptions, disputes and transaction search, used in both directions: the nine write actions
-  are what Warden gates, and `get_invoice`, `get_dispute` and `show_subscription_details` are how
+  are what Interlock gates, and `get_invoice`, `get_dispute` and `show_subscription_details` are how
   it checks a proposal against PayPal's own record before deciding. Where the toolkit has no tool
-  — reading a capture — Warden calls the REST endpoint underneath it.
+  — reading a capture — Interlock calls the REST endpoint underneath it.
   Proposal parameters are validated against the toolkit's own schemas at proposal time, so a
   malformed request is refused while it is still cheap rather than at the moment money is meant to
   move.

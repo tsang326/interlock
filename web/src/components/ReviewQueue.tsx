@@ -133,7 +133,7 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
       },
       {
         colId: 'why',
-        headerName: 'Why Warden decided this',
+        headerName: 'Why Interlock decided this',
         flex: 1,
         minWidth: 240,
         valueGetter: (p) => p.data?.policy.reason ?? '',

@@ -1,5 +1,5 @@
 /**
- * The guarantees Warden claims, as tests.
+ * The guarantees Interlock claims, as tests.
  *
  * Every test here runs with the risk model switched off, because the guarantee must not
  * depend on a language model agreeing with us. The `pnpm test` script blanks
@@ -16,7 +16,7 @@ import { Store } from './core/db.js';
 import { deriveFacts, findMismatches } from './core/derive.js';
 import { seedDefaultRules } from './core/policy.js';
 import { createApi } from './http/api.js';
-import { Warden } from './core/warden.js';
+import { Interlock } from './core/interlock.js';
 import { PayPalExecutor, assertSucceeded, type Executor } from './paypal/executor.js';
 import type { ActionKind, ProposalInput } from './core/types.js';
 
@@ -77,7 +77,7 @@ const captureOf = (value: string, status = 'COMPLETED', currency = 'USD') => ({
 
 /** A store whose counterparty already has history, so auto-approve rules are reachable. */
 function freshStore(tag: string): Store {
-  const file = `/tmp/warden-test-${tag}-${process.pid}.sqlite`;
+  const file = `/tmp/interlock-test-${tag}-${process.pid}.sqlite`;
   for (const f of [file, `${file}-wal`, `${file}-shm`]) if (existsSync(f)) unlinkSync(f);
   dbs.push(file);
   const store = new Store(file);
@@ -179,8 +179,8 @@ describe('deriving facts from the parameters PayPal will receive', () => {
 
 describe('policy never decides on what the agent says about itself', () => {
   test('an understated refund cannot auto-approve', async () => {
-    const warden = new Warden(freshStore('understate'), new StubExecutor());
-    const proposal = await warden.submit(
+    const interlock = new Interlock(freshStore('understate'), new StubExecutor());
+    const proposal = await interlock.submit(
       refund({
         declaredAmount: { value: 1, currency: 'USD' },
         params: { capture_id: CAPTURE, amount: { currency_code: 'USD', value: '9500.00' } },
@@ -191,8 +191,8 @@ describe('policy never decides on what the agent says about itself', () => {
   });
 
   test('a refund with no amount cannot auto-approve, however small it is claimed to be', async () => {
-    const warden = new Warden(freshStore('noamount'), new StubExecutor());
-    const proposal = await warden.submit(
+    const interlock = new Interlock(freshStore('noamount'), new StubExecutor());
+    const proposal = await interlock.submit(
       refund({
         declaredAmount: { value: 10, currency: 'USD' },
         params: { capture_id: CAPTURE },
@@ -209,8 +209,8 @@ describe('policy never decides on what the agent says about itself', () => {
         store.upsertRule({ ...rule, enabled: false });
       }
     }
-    const warden = new Warden(store, new StubExecutor());
-    const proposal = await warden.submit(
+    const interlock = new Interlock(store, new StubExecutor());
+    const proposal = await interlock.submit(
       refund({ declaredAmount: { value: 9500, currency: 'USD' } }),
     );
     assert.equal(proposal.status, 'pending');
@@ -220,8 +220,8 @@ describe('policy never decides on what the agent says about itself', () => {
 
   test('an honest small refund still runs unattended, and PayPal is called once', async () => {
     const executor = new StubExecutor('succeed', captureOf('20.00'));
-    const warden = new Warden(freshStore('honest'), executor);
-    const proposal = await warden.submit(
+    const interlock = new Interlock(freshStore('honest'), executor);
+    const proposal = await interlock.submit(
       refund({ declaredAmount: { value: 20, currency: 'USD' } }),
     );
     assert.equal(proposal.status, 'executed');
@@ -236,8 +236,8 @@ describe('policy never decides on what the agent says about itself', () => {
 
   test('a held proposal never reaches PayPal', async () => {
     const executor = new StubExecutor();
-    const warden = new Warden(freshStore('held'), executor);
-    const proposal = await warden.submit(
+    const interlock = new Interlock(freshStore('held'), executor);
+    const proposal = await interlock.submit(
       refund({
         declaredAmount: { value: 1, currency: 'USD' },
         params: { capture_id: CAPTURE, amount: { currency_code: 'USD', value: '9500.00' } },
@@ -248,8 +248,8 @@ describe('policy never decides on what the agent says about itself', () => {
   });
 
   test('a rejected PayPal call is recorded as failed, never as executed', async () => {
-    const warden = new Warden(freshStore('failed'), new StubExecutor('reject', captureOf('20.00')));
-    const proposal = await warden.submit(
+    const interlock = new Interlock(freshStore('failed'), new StubExecutor('reject', captureOf('20.00')));
+    const proposal = await interlock.submit(
       refund({ declaredAmount: { value: 20, currency: 'USD' } }),
     );
     assert.equal(proposal.status, 'failed');
@@ -278,8 +278,8 @@ describe('policy never decides on what the agent says about itself', () => {
   });
 
   test('a proposal that claims nothing is judged on the request alone', async () => {
-    const warden = new Warden(freshStore('silent'), new StubExecutor('succeed', captureOf('20.00')));
-    const proposal = await warden.submit(refund({ declaredAmount: undefined }));
+    const interlock = new Interlock(freshStore('silent'), new StubExecutor('succeed', captureOf('20.00')));
+    const proposal = await interlock.submit(refund({ declaredAmount: undefined }));
     assert.equal(proposal.status, 'executed');
   });
 });
@@ -302,8 +302,8 @@ describe('what PayPal itself says', () => {
     // The request asks for 20.00, which is under the auto-approve ceiling and matches
     // what the agent claims. Nothing in the parameters is wrong.
     const executor = new StubExecutor('succeed', captureOf('5.00'));
-    const warden = new Warden(store, executor);
-    const proposal = await warden.submit(
+    const interlock = new Interlock(store, executor);
+    const proposal = await interlock.submit(
       refund({ declaredAmount: { value: 20, currency: 'USD' } }),
     );
 
@@ -316,10 +316,10 @@ describe('what PayPal itself says', () => {
 
   test('a capture PayPal has already refunded cannot be refunded again', async () => {
     const executor = new StubExecutor('succeed', captureOf('20.00', 'REFUNDED'));
-    const warden = new Warden(freshStore('alreadyrefunded'), executor);
+    const interlock = new Interlock(freshStore('alreadyrefunded'), executor);
     // Under the auto-approve ceiling, truthfully declared, against a counterparty with
     // history. Nothing in the request or the agent's account is wrong.
-    const proposal = await warden.submit(refund({ declaredAmount: { value: 20, currency: 'USD' } }));
+    const proposal = await interlock.submit(refund({ declaredAmount: { value: 20, currency: 'USD' } }));
 
     assert.equal(proposal.mismatches.length, 0);
     assert.equal(proposal.verification.status, 'contradicted');
@@ -330,11 +330,11 @@ describe('what PayPal itself says', () => {
 
   test('a partly refunded capture is an unknown, not a refusal', async () => {
     // PayPal does allow another refund here; it just will not say how much is left.
-    // Warden must neither block a legitimate action nor bound it on a number it does
+    // Interlock must neither block a legitimate action nor bound it on a number it does
     // not have.
     const executor = new StubExecutor('succeed', captureOf('20.00', 'PARTIALLY_REFUNDED'));
-    const warden = new Warden(freshStore('partialrefund'), executor);
-    const proposal = await warden.submit(refund({ declaredAmount: { value: 20, currency: 'USD' } }));
+    const interlock = new Interlock(freshStore('partialrefund'), executor);
+    const proposal = await interlock.submit(refund({ declaredAmount: { value: 20, currency: 'USD' } }));
 
     assert.equal(proposal.verification.status, 'unavailable');
     assert.match(proposal.verification.error ?? '', /remainder/i);
@@ -344,8 +344,8 @@ describe('what PayPal itself says', () => {
   });
 
   test('a refund with no amount gets a real figure from PayPal, and a rule can then bound it', async () => {
-    const warden = new Warden(freshStore('wholecapture'), new StubExecutor('succeed', captureOf('4200.00')));
-    const proposal = await warden.submit(refund({ declaredAmount: undefined, params: { capture_id: CAPTURE } }));
+    const interlock = new Interlock(freshStore('wholecapture'), new StubExecutor('succeed', captureOf('4200.00')));
+    const proposal = await interlock.submit(refund({ declaredAmount: undefined, params: { capture_id: CAPTURE } }));
 
     // The request is still silent — that fact does not change.
     assert.equal(proposal.amountStatus, 'unverifiable');
@@ -358,8 +358,8 @@ describe('what PayPal itself says', () => {
 
   test('the same refund runs unattended once PayPal shows the capture is small', async () => {
     const executor = new StubExecutor('succeed', captureOf('12.00'));
-    const warden = new Warden(freshStore('smallcapture'), executor);
-    const proposal = await warden.submit(refund({ declaredAmount: undefined, params: { capture_id: CAPTURE } }));
+    const interlock = new Interlock(freshStore('smallcapture'), executor);
+    const proposal = await interlock.submit(refund({ declaredAmount: undefined, params: { capture_id: CAPTURE } }));
 
     // "Refund the whole capture" was previously unbounded by definition. It is bounded
     // now, because PayPal was asked what the whole capture is.
@@ -371,21 +371,21 @@ describe('what PayPal itself says', () => {
   test('a lookup that fails is never read as a lookup that passed', async () => {
     // The stub answers nothing, so the verification call throws.
     const executor = new StubExecutor();
-    const warden = new Warden(freshStore('lookupfail'), executor);
-    const proposal = await warden.submit(refund({ declaredAmount: undefined, params: { capture_id: CAPTURE } }));
+    const interlock = new Interlock(freshStore('lookupfail'), executor);
+    const proposal = await interlock.submit(refund({ declaredAmount: undefined, params: { capture_id: CAPTURE } }));
 
     assert.equal(proposal.verification.status, 'unavailable');
     assert.ok(proposal.verification.error);
     assert.equal(proposal.verification.findings.length, 0, 'silence is not a finding against the agent');
     assert.equal(proposal.status, 'pending');
-    // No rule can match an amount nobody could establish, and Warden holds whatever it
+    // No rule can match an amount nobody could establish, and Interlock holds whatever it
     // was not explicitly told to allow rather than falling through to execution.
     assert.deepEqual(proposal.policy.matchedRules, []);
     assert.equal(executor.calls.length, 0);
   });
 
   test('conceding a dispute is priced by PayPal, not by the agent', async () => {
-    const warden = new Warden(
+    const interlock = new Interlock(
       freshStore('dispute'),
       new StubExecutor('succeed', {
         get_dispute: {
@@ -396,13 +396,13 @@ describe('what PayPal itself says', () => {
         },
       }),
     );
-    const proposal = await warden.submit({
+    const proposal = await interlock.submit({
       kind: 'accept_dispute_claim',
       sessionId: 'test',
       rationale: 'Customer says the goods never arrived; conceding is cheaper than fighting it.',
       declaredAmount: { value: 40, currency: 'USD' },
       // The toolkit validates this note against its dispute-id regex, so it may not
-      // contain spaces. Warden refuses a malformed proposal here rather than at the
+      // contain spaces. Interlock refuses a malformed proposal here rather than at the
       // moment money is meant to move.
       params: { dispute_id: 'PP-D-9001', note: 'customer-request' },
     });
@@ -413,7 +413,7 @@ describe('what PayPal itself says', () => {
   });
 
   test('cancelling a subscription PayPal has already cancelled is a contradiction', async () => {
-    const warden = new Warden(
+    const interlock = new Interlock(
       freshStore('subcancelled'),
       new StubExecutor('succeed', {
         show_subscription_details: {
@@ -423,7 +423,7 @@ describe('what PayPal itself says', () => {
         },
       }),
     );
-    const proposal = await warden.submit({
+    const proposal = await interlock.submit({
       kind: 'cancel_subscription',
       sessionId: 'test',
       rationale: 'Customer asked to cancel.',
@@ -441,7 +441,7 @@ describe('the audit chain', () => {
     const store = freshStore('chain');
     store.append('proposal.created', 'agent', { a: 1 }, 'p1');
     store.append('proposal.approved', 'sang', { note: 'ok' }, 'p1');
-    store.append('proposal.executed', 'warden', { live: false }, 'p1');
+    store.append('proposal.executed', 'interlock', { live: false }, 'p1');
     assert.equal(store.verifyChain().ok, true);
 
     const raw = new Database(dbs[dbs.length - 1]!);
@@ -460,7 +460,7 @@ describe('the audit chain', () => {
   test('KNOWN LIMIT: truncating the tail is not detectable from inside the chain', () => {
     const store = freshStore('truncate');
     store.append('proposal.created', 'agent', { a: 1 }, 'p1');
-    store.append('proposal.executed', 'warden', { live: false }, 'p1');
+    store.append('proposal.executed', 'interlock', { live: false }, 'p1');
     const raw = new Database(dbs[dbs.length - 1]!);
     raw.prepare('DELETE FROM audit WHERE seq = 2').run();
     raw.close();
@@ -474,14 +474,14 @@ describe('the agent cannot decide its own proposals', () => {
   /** Starts the real Express app on an ephemeral port and returns its base URL. */
   async function serve() {
     const store = freshStore(`http-${Math.random().toString(36).slice(2, 8)}`);
-    const warden = new Warden(store, new StubExecutor());
-    const app = createApi(store, warden, new PayPalExecutor());
+    const interlock = new Interlock(store, new StubExecutor());
+    const app = createApi(store, interlock, new PayPalExecutor());
     const server = app.listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : 0;
     // A proposal that is held, so there is something left to decide.
-    const proposal = await warden.submit(
+    const proposal = await interlock.submit(
       refund({
         declaredAmount: { value: 1, currency: 'USD' },
         params: { capture_id: CAPTURE, amount: { currency_code: 'USD', value: '9500.00' } },
@@ -497,7 +497,7 @@ describe('the agent cannot decide its own proposals', () => {
   test('the read route refuses anything that is not a read, including by its real name', async () => {
     const { base, close } = await serve();
     try {
-      // `create_refund` is a real PayPal tool and a real Warden action kind. Naming it
+      // `create_refund` is a real PayPal tool and a real Interlock action kind. Naming it
       // here must fail the same way as naming nonsense: reads and writes do not share
       // a door.
       for (const tool of ['create_refund', 'cancel_subscription', 'pay_order', 'not_a_tool']) {
@@ -584,6 +584,77 @@ describe('the agent cannot decide its own proposals', () => {
       const entry = s.store.auditEntries(1)[0]!;
       assert.equal(entry.type, 'proposal.rejected');
       assert.equal(entry.actor, 'demo-reviewer');
+    } finally {
+      s.close();
+    }
+  });
+});
+
+describe('the demo cannot be made to spend without a ceiling', () => {
+  /**
+   * The deployed demo publishes its URL and its tokens, and an agent run is a
+   * multi-turn model conversation. So the interesting question is not whether a
+   * stranger can start a run — they can, that is the demo — but whether they can
+   * start an unbounded number of them.
+   */
+  async function serve(agentRunBudget: number) {
+    const store = freshStore(`budget-${Math.random().toString(36).slice(2, 8)}`);
+    const interlock = new Interlock(store, new StubExecutor());
+    const app = createApi(store, interlock, new PayPalExecutor(), { agentRunBudget });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    return { base: `http://127.0.0.1:${port}`, close: () => server.close() };
+  }
+
+  const run = (base: string, headers: Record<string, string>) =>
+    fetch(`${base}/api/agent/run`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ taskId: 'msg-5150' }),
+    });
+
+  test('a spent budget refuses the run and says so, rather than spending anyway', async () => {
+    const s = await serve(0);
+    try {
+      const response = await run(s.base, { authorization: 'Bearer demo-reviewer-token' });
+      assert.equal(response.status, 429);
+      const body = (await response.json()) as { error: string; budget: number };
+      assert.equal(body.error, 'agent_budget_spent');
+      assert.equal(body.budget, 0);
+    } finally {
+      s.close();
+    }
+  });
+
+  test('an agent token cannot start a run, so it cannot spend the budget it benefits from', async () => {
+    const s = await serve(5);
+    try {
+      const response = await run(s.base, { authorization: 'Bearer demo-agent-token' });
+      assert.equal(response.status, 403);
+    } finally {
+      s.close();
+    }
+  });
+
+  test('an unauthenticated caller cannot start a run', async () => {
+    const s = await serve(5);
+    try {
+      const response = await run(s.base, {});
+      assert.equal(response.status, 401);
+    } finally {
+      s.close();
+    }
+  });
+
+  test('health states the ceiling, so it is visible rather than a surprise', async () => {
+    const s = await serve(3);
+    try {
+      const health = (await (await fetch(`${s.base}/api/health`)).json()) as {
+        agentRuns: { started: number; budget: number };
+      };
+      assert.deepEqual(health.agentRuns, { started: 0, budget: 3 });
     } finally {
       s.close();
     }

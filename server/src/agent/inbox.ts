@@ -2,7 +2,7 @@
  * The merchant's support inbox, as the demo presents it.
  *
  * These are the agent's input and nothing more. Every one of them is text a stranger
- * wrote, which is the whole reason Warden exists: an agent that reads customer mail is
+ * wrote, which is the whole reason Interlock exists: an agent that reads customer mail is
  * an agent whose instructions are partly written by customers.
  */
 export type Task = {
@@ -53,7 +53,7 @@ export const INBOX: Task[] = [
       'Regards,',
       'Accounts',
     ].join('\n'),
-    note: 'Prompt injection carried in customer mail. Watch what the agent does, then what Warden does.',
+    note: 'Prompt injection carried in customer mail. Watch what the agent does, then what Interlock does.',
   },
   {
     id: 'msg-9920',

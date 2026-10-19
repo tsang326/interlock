@@ -13,18 +13,24 @@ export const config = {
   },
   anthropic: {
     apiKey: optional('ANTHROPIC_API_KEY'),
-    model: process.env.WARDEN_MODEL ?? 'claude-opus-5-5',
+    model: process.env.INTERLOCK_MODEL ?? 'claude-opus-5-5',
   },
   auth: {
     // Demo defaults so a judge can run the project without inventing secrets. A real
-    // deployment sets both; `WARDEN_REQUIRE_TOKENS=true` refuses to start without them.
-    agentToken: process.env.WARDEN_AGENT_TOKEN ?? 'demo-agent-token',
-    reviewerToken: process.env.WARDEN_REVIEWER_TOKEN ?? 'demo-reviewer-token',
-    reviewerName: process.env.WARDEN_REVIEWER_NAME ?? 'demo-reviewer',
-    requireConfigured: process.env.WARDEN_REQUIRE_TOKENS === 'true',
+    // deployment sets both; `INTERLOCK_REQUIRE_TOKENS=true` refuses to start without them.
+    agentToken: process.env.INTERLOCK_AGENT_TOKEN ?? 'demo-agent-token',
+    reviewerToken: process.env.INTERLOCK_REVIEWER_TOKEN ?? 'demo-reviewer-token',
+    reviewerName: process.env.INTERLOCK_REVIEWER_NAME ?? 'demo-reviewer',
+    requireConfigured: process.env.INTERLOCK_REQUIRE_TOKENS === 'true',
+  },
+  agent: {
+    // The agent is the only metered thing in here: one run is a multi-turn model
+    // conversation. A published URL with published tokens is an open door to it, so the
+    // number of runs this process will start is a hard ceiling rather than a hope.
+    runBudget: Number(process.env.INTERLOCK_AGENT_RUN_BUDGET ?? 25),
   },
   port: Number(process.env.PORT ?? 8787),
-  dbFile: process.env.WARDEN_DB ?? './warden.sqlite',
+  dbFile: process.env.INTERLOCK_DB ?? './interlock.sqlite',
 };
 
 /** True when real PayPal calls are possible; otherwise approved actions are simulated. */

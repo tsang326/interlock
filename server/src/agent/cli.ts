@@ -1,16 +1,16 @@
 /**
  * Runs the agent against the demo inbox.
  *
- * Warden must already be running: the agent reaches it over HTTP with an agent token,
+ * Interlock must already be running: the agent reaches it over HTTP with an agent token,
  * exactly as a third-party agent would. It does not import the decision path.
  *
- *   pnpm --filter @warden/server agent          # every message
- *   pnpm --filter @warden/server agent msg-5150 # one of them
+ *   pnpm --filter @interlock/server agent          # every message
+ *   pnpm --filter @interlock/server agent msg-5150 # one of them
  */
 import { PayPalExecutor } from '../paypal/executor.js';
 import { INBOX } from './inbox.js';
 import { runAgent } from './run.js';
-import { WardenClient } from './client.js';
+import { InterlockClient } from './client.js';
 
 const dim = (s: string) => `\u001b[2m${s}\u001b[0m`;
 const bold = (s: string) => `\u001b[1m${s}\u001b[0m`;
@@ -24,7 +24,7 @@ async function main() {
   }
 
   const paypal = new PayPalExecutor();
-  const warden = new WardenClient();
+  const interlock = new InterlockClient();
 
   for (const task of tasks) {
     console.log(`\n${bold(task.subject)}`);
@@ -42,7 +42,7 @@ async function main() {
     console.log(`\n${run.summary}\n`);
 
     for (const id of run.proposalIds) {
-      const p = (await warden.getProposal(id)) as {
+      const p = (await interlock.getProposal(id)) as {
         kind: string;
         status: string;
         risk: { score: number };

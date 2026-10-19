@@ -19,7 +19,7 @@ export type Caller = { role: Role; actor: string };
  * The caller is stashed on the request under a private symbol rather than by augmenting
  * Express's global types, which would loosen `req.params` everywhere else.
  */
-const CALLER = Symbol('warden.caller');
+const CALLER = Symbol('interlock.caller');
 
 export function callerOf(req: Request): Caller {
   const caller = (req as Request & { [CALLER]?: Caller })[CALLER];

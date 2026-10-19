@@ -26,7 +26,7 @@ export type PolicyFacts = {
 export const DEFAULT_DECISION: PolicyOutcome = {
   decision: 'needs_review',
   matchedRules: [],
-  reason: 'No rule matched. Warden holds anything it was not explicitly told to allow.',
+  reason: 'No rule matched. Interlock holds anything it was not explicitly told to allow.',
 };
 
 export const DEFAULT_RULES: Rule[] = [
@@ -165,7 +165,7 @@ export function evaluatePolicy(
  * The last word on auto-approval, and it is not a rule — rules are editable from the
  * console, and this must not be.
  *
- * An action only runs unattended when Warden could read what it does out of the request
+ * An action only runs unattended when Interlock could read what it does out of the request
  * and the agent's account of it matched. An amount PayPal will decide for us (a refund
  * with no amount takes the whole capture) is not a small amount; it is an unknown one.
  */
@@ -189,7 +189,7 @@ function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyO
     };
   }
 
-  // Warden asked PayPal and got no answer. The request's own amount is a ceiling, not a
+  // Interlock asked PayPal and got no answer. The request's own amount is a ceiling, not a
   // proof: it cannot say the resource exists, is in a state the action can be applied
   // to, or has anything left. Acting unattended on strictly less information than the
   // design calls for is the same mistake as trusting the agent's word, one step removed.

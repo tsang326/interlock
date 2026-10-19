@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.WARDEN_API ?? 'http://localhost:8787',
+        target: process.env.INTERLOCK_API ?? 'http://localhost:8787',
         changeOrigin: true,
       },
     },

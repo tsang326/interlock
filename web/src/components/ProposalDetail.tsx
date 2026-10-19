@@ -31,7 +31,7 @@ export function ProposalDetail({ proposal, busy, onApprove, onReject }: Props) {
         <div className="empty">
           Select a proposal to see what the agent asked for,
           <br />
-          and why Warden held it.
+          and why Interlock held it.
         </div>
       </aside>
     );

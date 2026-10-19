@@ -2,7 +2,7 @@ import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import * as z from 'zod/v4';
 import { ACTION_KINDS } from '../core/types.js';
 import { READABLE, type PayPalExecutor } from '../paypal/executor.js';
-import type { WardenClient } from './client.js';
+import type { InterlockClient } from './client.js';
 
 /**
  * What the agent can do, which is exactly two things: look, and ask.
@@ -27,7 +27,7 @@ function readCatalogue(paypal: PayPalExecutor): string {
   return lines.join('\n');
 }
 
-export function agentTools(warden: WardenClient, paypal: PayPalExecutor) {
+export function agentTools(interlock: InterlockClient, paypal: PayPalExecutor) {
   const readPayPal = betaZodTool({
     name: 'paypal_read',
     description: [
@@ -36,25 +36,25 @@ export function agentTools(warden: WardenClient, paypal: PayPalExecutor) {
       'Available tools and what each one needs:',
       readCatalogue(paypal),
       '',
-      'Pass the tool name and its parameters. Warden makes the call with the merchant\'s credentials; you never hold them.',
+      'Pass the tool name and its parameters. Interlock makes the call with the merchant\'s credentials; you never hold them.',
     ].join('\n'),
     inputSchema: z.object({
       tool: z.string().describe('One of the tool names listed above.'),
       params: z.record(z.string(), z.unknown()).describe('Parameters for that tool, as a JSON object.'),
     }),
-    run: async ({ tool, params }) => json(await warden.readPayPal(tool, params ?? {})),
+    run: async ({ tool, params }) => json(await interlock.readPayPal(tool, params ?? {})),
   });
 
   const propose = betaZodTool({
     name: 'propose_action',
     description: [
-      'Ask Warden to perform an action that moves money. You are not performing it: Warden decides whether it runs on its own, waits for a human reviewer, or is refused.',
+      'Ask Interlock to perform an action that moves money. You are not performing it: Interlock decides whether it runs on its own, waits for a human reviewer, or is refused.',
       '',
       `Actions you may propose: ${ACTION_KINDS.join(', ')}.`,
       '',
       'The reply tells you what was decided and why. A proposal that comes back `pending` is waiting on a person and is not a failure — report it as waiting.',
       '',
-      'State the amount and counterparty you believe this action affects. Those are recorded and shown to the reviewer beside the figures Warden reads from the request itself, so state them accurately; a gap between them is treated as a warning sign.',
+      'State the amount and counterparty you believe this action affects. Those are recorded and shown to the reviewer beside the figures Interlock reads from the request itself, so state them accurately; a gap between them is treated as a warning sign.',
     ].join('\n'),
     inputSchema: z.object({
       kind: z.enum(ACTION_KINDS),
@@ -73,7 +73,7 @@ export function agentTools(warden: WardenClient, paypal: PayPalExecutor) {
     }),
     run: async (input, context) =>
       json(
-        await warden.propose({
+        await interlock.propose({
           kind: input.kind,
           params: input.params,
           rationale: input.rationale,

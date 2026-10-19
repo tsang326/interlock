@@ -26,7 +26,7 @@ type Listener = (event: { type: string; proposal?: Proposal }) => void;
  * `execute` is private and runs only for a proposal already in `approved`. There is
  * no route from a proposal to PayPal that skips this file.
  */
-export class Warden {
+export class Interlock {
   private listeners = new Set<Listener>();
 
   constructor(
@@ -124,13 +124,13 @@ export class Warden {
     );
 
     if (policy.decision === 'block') {
-      this.store.append('proposal.blocked', 'warden', { reason: policy.reason }, proposal.id);
+      this.store.append('proposal.blocked', 'interlock', { reason: policy.reason }, proposal.id);
       this.emit('proposal.blocked', proposal);
       return proposal;
     }
 
     if (policy.decision === 'auto_approve') {
-      this.store.append('proposal.auto_approved', 'warden', { reason: policy.reason }, proposal.id);
+      this.store.append('proposal.auto_approved', 'interlock', { reason: policy.reason }, proposal.id);
       this.emit('proposal.auto_approved', proposal);
       return this.execute(proposal.id);
     }
@@ -189,7 +189,7 @@ export class Warden {
       // proves not just that a decision happened but what it was about.
       this.store.append(
         'proposal.executed',
-        'warden',
+        'interlock',
         {
           live: this.paypal.live,
           paramsHash: hashParams(proposal.params),
@@ -203,7 +203,7 @@ export class Warden {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.store.updateProposal(id, { status: 'failed', error: message });
-      this.store.append('proposal.failed', 'warden', { error: message }, id);
+      this.store.append('proposal.failed', 'interlock', { error: message }, id);
       const updated = this.require(id);
       this.emit('proposal.failed', updated);
       return updated;

@@ -3,16 +3,16 @@ import { config } from '../config.js';
 /**
  * The agent's entire reach.
  *
- * It holds a Warden token and nothing else — no PayPal client id, no secret, no
- * database handle. It reads PayPal because Warden will make a read on its behalf, and
+ * It holds an Interlock token and nothing else — no PayPal client id, no secret, no
+ * database handle. It reads PayPal because Interlock will make a read on its behalf, and
  * it moves money by asking, never by doing. If this file were the only thing an
  * attacker controlled, the worst available outcome would be a queue of refused
  * proposals.
  */
-export class WardenClient {
+export class InterlockClient {
   constructor(
-    private baseUrl = process.env.WARDEN_URL ?? `http://localhost:${config.port}`,
-    private token = process.env.WARDEN_AGENT_TOKEN ?? 'demo-agent-token',
+    private baseUrl = process.env.INTERLOCK_URL ?? `http://localhost:${config.port}`,
+    private token = process.env.INTERLOCK_AGENT_TOKEN ?? 'demo-agent-token',
   ) {}
 
   private async call(path: string, body: unknown): Promise<unknown> {

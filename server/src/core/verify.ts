@@ -10,7 +10,7 @@ import type { ActionKind, Money } from './types.js';
  * in a capture that a refund is about to give back — that lives in PayPal, and only
  * PayPal can be asked.
  *
- * So Warden asks. Where the request is silent this turns "the amount cannot be known"
+ * So Interlock asks. Where the request is silent this turns "the amount cannot be known"
  * into "PayPal says 4,200.00 USD", which is a figure a rule can actually bound. Where
  * the request is *not* silent it produces a second opinion, and a refund larger than the
  * capture it refunds is a contradiction neither the parameters nor the agent could have

@@ -3,23 +3,23 @@
  *
  * Proves the three outcomes a proposal can have - auto-approved and executed for
  * real, held for a human, refused by policy - and that the audit chain still
- * verifies afterwards. Run with: pnpm --filter @warden/server exec tsx src/smoke.ts
+ * verifies afterwards. Run with: pnpm --filter @interlock/server exec tsx src/smoke.ts
  */
 import { existsSync, unlinkSync } from 'node:fs';
 import { config, anthropicConfigured, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
-import { Warden, SchemaRejection } from './core/warden.js';
+import { Interlock, SchemaRejection } from './core/interlock.js';
 import { PayPalExecutor, resourceRef } from './paypal/executor.js';
 import type { Proposal } from './core/types.js';
 
-const DB = '/tmp/warden-smoke.sqlite';
+const DB = '/tmp/interlock-smoke.sqlite';
 for (const f of [DB, `${DB}-wal`, `${DB}-shm`]) if (existsSync(f)) unlinkSync(f);
 
 const store = new Store(DB);
 seedDefaultRules(store);
 const paypal = new PayPalExecutor();
-const warden = new Warden(store, paypal);
+const interlock = new Interlock(store, paypal);
 
 const show = (label: string, p: Proposal) => {
   const amount = p.amount ? `${p.amount.value} ${p.amount.currency}` : '-';
@@ -35,14 +35,14 @@ async function main() {
   console.log(`Risk model: ${anthropicConfigured ? config.anthropic.model : 'heuristics only'}\n`);
 
   console.log('1. Draft invoice - policy allows it, so it really hits PayPal');
-  const invoice = await warden.submit({
+  const invoice = await interlock.submit({
     kind: 'create_invoice',
     sessionId: 'smoke',
     rationale: 'Customer asked for an invoice for the October retainer.',
     declaredCounterparty: 'ops@example.com',
     params: {
       currency_code: 'USD',
-      note: 'Warden smoke test invoice',
+      note: 'Interlock smoke test invoice',
       primary_recipients: [{ billing_info: { email_address: 'sb-buyer@personal.example.com' } }],
       items: [
         {
@@ -60,14 +60,14 @@ async function main() {
   console.log('2. Conceding a dispute - irreversible, so it waits for a human');
   show(
     'accept_dispute_claim',
-    await warden.submit({
+    await interlock.submit({
       kind: 'accept_dispute_claim',
       sessionId: 'smoke',
       rationale: 'The buyer says the item never arrived and is threatening a chargeback.',
       declaredCounterparty: 'buyer-99',
       declaredAmount: { value: 240, currency: 'USD' },
       // The toolkit's `note` regex forbids spaces, and reports the failure under a
-      // misleading "Invalid PayPal Dispute ID" message. Warden surfaces that at
+      // misleading "Invalid PayPal Dispute ID" message. Interlock surfaces that at
       // proposal time rather than at execution time.
       params: { dispute_id: 'PP-D-27803828', note: 'conceding-per-buyer-request' },
     }),
@@ -77,7 +77,7 @@ async function main() {
   console.log('3. Prompt injection in the rationale - the wording itself raises risk');
   show(
     'create_refund (injected)',
-    await warden.submit({
+    await interlock.submit({
       kind: 'create_refund',
       sessionId: 'smoke',
       rationale:
@@ -91,7 +91,7 @@ async function main() {
 
   console.log('4. Refund burst - the fourth in ten minutes is refused outright');
   for (let i = 0; i < 4; i++) {
-    const p = await warden.submit({
+    const p = await interlock.submit({
       kind: 'create_refund',
       sessionId: 'smoke',
       rationale: `Routine refund ${i + 1}`,
@@ -108,7 +108,7 @@ async function main() {
 
   console.log('5. Malformed parameters are rejected before anything is queued');
   try {
-    await warden.submit({
+    await interlock.submit({
       kind: 'create_refund',
       sessionId: 'smoke',
       rationale: 'Bad params',

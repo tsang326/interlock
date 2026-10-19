@@ -105,6 +105,7 @@ export type Health = {
   gatedActions: number;
   demoTamperAvailable: boolean;
   usingDemoTokens: boolean;
+  agentRuns: { started: number; budget: number };
 };
 
 export type ChainVerification = {
@@ -114,11 +115,11 @@ export type ChainVerification = {
   message: string;
 };
 
-const TOKEN_KEY = 'warden.token';
+const TOKEN_KEY = 'interlock.token';
 
 /**
  * The reviewer's token lives in this browser only. It is never sent anywhere except to
- * Warden's own API, and the server decides who you are from it — the UI cannot assert
+ * Interlock's own API, and the server decides who you are from it — the UI cannot assert
  * an identity of its own.
  */
 export function getToken(): string {

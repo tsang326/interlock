@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { anthropicConfigured, config, paypalConfigured, usingDemoTokens } from '../config.js';
 import type { Store } from '../core/db.js';
 import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
-import { InvalidTransition, SchemaRejection, type Warden } from '../core/warden.js';
+import { InvalidTransition, SchemaRejection, type Interlock } from '../core/interlock.js';
 import { READABLE, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
 import { INBOX } from '../agent/inbox.js';
 import { runAgent } from '../agent/run.js';
@@ -72,7 +72,21 @@ function fail(res: Response, error: unknown): void {
   res.status(500).json({ error: 'internal', detail: error instanceof Error ? error.message : String(error) });
 }
 
-export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) {
+export function createApi(
+  store: Store,
+  interlock: Interlock,
+  paypal: PayPalExecutor,
+  options: { agentRunBudget?: number } = {},
+) {
+  // Spending, not traffic, is what needs the ceiling here: an agent run costs model
+  // calls, and this deployment publishes both its URL and its tokens. The budget is
+  // counted per process, and one run at a time stops a loop from multiplying it. The
+  // UI disables the button while a run streams; a caller using curl does not, so the
+  // check lives here.
+  const agentRunBudget = options.agentRunBudget ?? config.agent.runBudget;
+  let agentRunsStarted = 0;
+  let agentRunInFlight = false;
+
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));
@@ -86,6 +100,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       gatedActions: ACTION_KINDS.length,
       demoTamperAvailable: config.paypal.sandbox,
       usingDemoTokens,
+      agentRuns: { started: agentRunsStarted, budget: agentRunBudget },
     });
   });
 
@@ -117,16 +132,43 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       res.status(404).json({ error: 'not_found', detail: `No message ${parsed.data.taskId}.` });
       return;
     }
+    // Both of these are refusals about spending, so they are answered before the model
+    // is consulted and before anything is counted against the budget.
+    if (agentRunInFlight) {
+      res.status(409).json({
+        error: 'agent_busy',
+        detail: 'One agent run at a time. A run is streaming to whoever started it; try again when it ends.',
+      });
+      return;
+    }
+    if (agentRunsStarted >= agentRunBudget) {
+      res.status(429).json({
+        error: 'agent_budget_spent',
+        detail:
+          `This deployment starts at most ${agentRunBudget} agent runs, and all of them have been used. ` +
+          'The runs that were made are still in the queue and the audit log. ' +
+          'Raise INTERLOCK_AGENT_RUN_BUDGET to allow more.',
+        started: agentRunsStarted,
+        budget: agentRunBudget,
+      });
+      return;
+    }
     if (!anthropicConfigured) {
       res.status(503).json({
         error: 'no_model',
-        detail: 'The agent needs ANTHROPIC_API_KEY. Warden itself runs without one.',
+        detail: 'The agent needs ANTHROPIC_API_KEY. Interlock itself runs without one.',
       });
       return;
     }
 
+    agentRunsStarted += 1;
+    agentRunInFlight = true;
+
     res.setHeader('content-type', 'application/x-ndjson');
     res.setHeader('cache-control', 'no-store');
+    // The SSE route sets this against proxies that buffer a stream; a streamed fetch
+    // needs it for the same reason, or the trace arrives in one lump at the end.
+    res.setHeader('X-Accel-Buffering', 'no');
     const send = (event: unknown) => res.write(`${JSON.stringify(event)}\n`);
 
     try {
@@ -134,6 +176,8 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       send({ type: 'done', summary: run.summary, proposalIds: run.proposalIds, sessionId: run.sessionId });
     } catch (error) {
       send({ type: 'error', detail: error instanceof Error ? error.message : String(error) });
+    } finally {
+      agentRunInFlight = false;
     }
     res.end();
   });
@@ -141,7 +185,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
   /* ---- reading PayPal ---- */
 
   /**
-   * The agent's only way to see PayPal. Warden holds the credentials and makes the
+   * The agent's only way to see PayPal. Interlock holds the credentials and makes the
    * call; the agent gets the answer.
    *
    * The allow-list is the point. A caller naming `create_refund` here is refused in the
@@ -167,7 +211,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
     try {
       res.json({ tool, result: await paypal.read(tool, params) });
     } catch (error) {
-      // A PayPal refusal is the agent's problem to handle, not a Warden fault.
+      // A PayPal refusal is the agent's problem to handle, not an Interlock fault.
       res.status(502).json({
         error: 'paypal_refused',
         detail: error instanceof Error ? error.message : String(error),
@@ -205,7 +249,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       return;
     }
     try {
-      res.status(201).json(await warden.submit(parsed.data));
+      res.status(201).json(await interlock.submit(parsed.data));
     } catch (error) {
       fail(res, error);
     }
@@ -218,7 +262,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       return;
     }
     try {
-      res.json(await warden.approve(req.params.id, callerOf(req).actor, parsed.data.note));
+      res.json(await interlock.approve(req.params.id, callerOf(req).actor, parsed.data.note));
     } catch (error) {
       fail(res, error);
     }
@@ -231,7 +275,7 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
       return;
     }
     try {
-      res.json(warden.reject(req.params.id, callerOf(req).actor, parsed.data.note));
+      res.json(interlock.reject(req.params.id, callerOf(req).actor, parsed.data.note));
     } catch (error) {
       fail(res, error);
     }
@@ -288,8 +332,11 @@ export function createApi(store: Store, warden: Warden, paypal: PayPalExecutor) 
     });
     res.write(': connected\n\n');
 
-    const unsubscribe = warden.subscribe((event) => {
-      res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.proposal ?? {})}\n\n`);
+    const unsubscribe = interlock.subscribe((event) => {
+      // This route cannot carry a token, so it carries a notification and nothing more:
+      // an id and the new status. Everything else is fetched back through a guarded read.
+      const notice = event.proposal ? { id: event.proposal.id, status: event.proposal.status } : {};
+      res.write(`event: ${event.type}\ndata: ${JSON.stringify(notice)}\n\n`);
     });
     // Proxies drop idle streams; a comment every 25s is cheap and keeps it open.
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);

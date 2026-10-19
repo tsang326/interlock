@@ -2,13 +2,13 @@
  * Builds the demo state: a queue that tells the whole story at a glance.
  *
  * Run with: pnpm seed
- * Safe to re-run; it writes to whatever WARDEN_DB points at.
+ * Safe to re-run; it writes to whatever INTERLOCK_DB points at.
  */
 import { config, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
 import { setModelLayerEnabled } from './core/risk.js';
-import { SchemaRejection, Warden } from './core/warden.js';
+import { SchemaRejection, Interlock } from './core/interlock.js';
 import { PayPalExecutor, resourceRef } from './paypal/executor.js';
 import type { ProposalInput } from './core/types.js';
 
@@ -18,13 +18,13 @@ import type { ProposalInput } from './core/types.js';
  * work against resources PayPal actually holds.
  *
  *   CAPTURE  — 860.00 USD, COMPLETED and untouched.
- *   REFUNDED — 4,200.00 USD, PARTIALLY_REFUNDED by an earlier Warden run.
+ *   REFUNDED — 4,200.00 USD, PARTIALLY_REFUNDED by an earlier Interlock run.
  *
- * Override either with WARDEN_DEMO_CAPTURE / WARDEN_DEMO_PART_REFUNDED to point the demo
+ * Override either with INTERLOCK_DEMO_CAPTURE / INTERLOCK_DEMO_PART_REFUNDED to point the demo
  * at captures in your own sandbox.
  */
-const CAPTURE = process.env.WARDEN_DEMO_CAPTURE ?? '11F28618GB587605W';
-const PART_REFUNDED = process.env.WARDEN_DEMO_PART_REFUNDED ?? '9CG69063AL531292H';
+const CAPTURE = process.env.INTERLOCK_DEMO_CAPTURE ?? '11F28618GB587605W';
+const PART_REFUNDED = process.env.INTERLOCK_DEMO_PART_REFUNDED ?? '9CG69063AL531292H';
 
 const SCENARIO: Array<{ label: string; input: ProposalInput }> = [
   {
@@ -51,7 +51,7 @@ const SCENARIO: Array<{ label: string; input: ProposalInput }> = [
   {
     // The attack the whole design exists for: the agent's summary says one thing and the
     // request does another. Every amount rule would have waved this through on the stated
-    // figure, so Warden reads the figure out of the request instead.
+    // figure, so Interlock reads the figure out of the request instead.
     label: 'Agent understates a refund — says 12, moves 9,500',
     input: {
       kind: 'create_refund',
@@ -155,6 +155,7 @@ const SCENARIO: Array<{ label: string; input: ProposalInput }> = [
 ];
 
 /** Identical refunds in a row; once there are five in the window the rule blocks them. */
+const BURST_COUNT = 5;
 const BURST: ProposalInput = {
   kind: 'create_refund',
   sessionId: 'agent-loop-99',
@@ -170,7 +171,7 @@ const BURST: ProposalInput = {
 
 /**
  * Two real invoices in the sandbox, so the verification layer has something real to be
- * right about. The point of the demo is that Warden asks PayPal, which only means
+ * right about. The point of the demo is that Interlock asks PayPal, which only means
  * anything if PayPal has an answer.
  */
 async function createRealInvoices(paypal: PayPalExecutor) {
@@ -180,7 +181,7 @@ async function createRealInvoices(paypal: PayPalExecutor) {
     items?: Array<{ id?: string; status?: string; detail?: { note?: string }; amount?: { value?: string } }>;
   };
   const mine = (existing.items ?? []).filter(
-    (i) => i.detail?.note === 'warden-demo' && i.status === 'DRAFT',
+    (i) => i.detail?.note === 'interlock-demo' && i.status === 'DRAFT',
   );
   const bySize = (value: string) => mine.find((i) => i.amount?.value === value)?.id;
   const reusedBig = bySize('1200.00');
@@ -190,7 +191,7 @@ async function createRealInvoices(paypal: PayPalExecutor) {
   const draft = async (value: string, name: string) => {
     const result = await paypal.executeApproved('create_invoice', {
       currency_code: 'USD',
-      note: 'warden-demo',
+      note: 'interlock-demo',
       primary_recipients: [{ billing_info: { email_address: 'ap@northwind.example' } }],
       items: [{ name, quantity: '1', unit_amount: { currency_code: 'USD', value } }],
     });
@@ -211,7 +212,7 @@ function liveScenario(invoices: { big: string; small: string }): typeof SCENARIO
   return [
     {
       // The request carries an invoice id and nothing else. The agent calls it small.
-      // Only PayPal knows it is 1,200, and only because Warden asks.
+      // Only PayPal knows it is 1,200, and only because Interlock asks.
       label: 'Agent calls an invoice send routine — PayPal holds it at 1,200',
       input: {
         kind: 'send_invoice',
@@ -246,18 +247,11 @@ function liveScenario(invoices: { big: string; small: string }): typeof SCENARIO
 export async function seedDemo(
   store: Store,
   paypal: PayPalExecutor,
-  warden: Warden,
+  interlock: Interlock,
   options: { useModel?: boolean } = {},
 ): Promise<void> {
-  // Each proposal costs one model call when the model layer is on, and this files
-  // sixteen of them. Worth saying out loud rather than discovering on a bill.
   const useModel = options.useModel ?? true;
   setModelLayerEnabled(useModel);
-  console.log(
-    useModel
-      ? '  scoring with the model: 16 proposals, one model call each'
-      : '  rules only: no model calls',
-  );
 
   let scenario = SCENARIO;
   if (paypalConfigured) {
@@ -273,9 +267,18 @@ export async function seedDemo(
     }
   }
 
+  // Each proposal costs one model call when the model layer is on, and how many there are
+  // depends on whether a live sandbox added the invoice scenarios. Counted rather than
+  // written down, so the figure cannot drift from what actually gets filed.
+  console.log(
+    useModel
+      ? `  scoring with the model: ${scenario.length + BURST_COUNT} proposals, one model call each`
+      : '  rules only: no model calls',
+  );
+
   for (const { label, input } of scenario) {
     try {
-      const proposal = await warden.submit(input);
+      const proposal = await interlock.submit(input);
       console.log(`  ${proposal.status.padEnd(9)} risk ${String(proposal.risk.score).padStart(3)}  ${label}`);
     } catch (error) {
       if (error instanceof SchemaRejection) console.log(`  rejected  ${label}: ${error.detail}`);
@@ -284,8 +287,8 @@ export async function seedDemo(
   }
 
   console.log('\n  refund burst:');
-  for (let i = 0; i < 5; i++) {
-    const proposal = await warden.submit({ ...BURST, rationale: `Processing queued refund ${i + 1}.` });
+  for (let i = 0; i < BURST_COUNT; i++) {
+    const proposal = await interlock.submit({ ...BURST, rationale: `Processing queued refund ${i + 1}.` });
     console.log(`  ${proposal.status.padEnd(9)} risk ${String(proposal.risk.score).padStart(3)}  burst #${i + 1}`);
   }
 
@@ -303,7 +306,7 @@ async function main() {
   // `pnpm seed --rules-only` rebuilds the queue without spending anything, which is
   // what you want while changing the policy or the verification layer.
   const useModel = !process.argv.includes('--rules-only');
-  await seedDemo(store, paypal, new Warden(store, paypal), { useModel });
+  await seedDemo(store, paypal, new Interlock(store, paypal), { useModel });
 }
 
 // Only when run directly; importing this module must not seed anything.

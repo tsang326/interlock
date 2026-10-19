@@ -46,7 +46,7 @@ export function PolicyPanel({ onError }: { onError: (m: string) => void }) {
     <div className="scroll">
       <div className="hint" style={{ marginBottom: 10 }}>
         Rules run top to bottom and the first match decides. Anything no rule matches waits for a
-        human — Warden never falls through to execution.
+        human — Interlock never falls through to execution.
       </div>
 
       {rules.map((rule) => (
