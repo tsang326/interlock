@@ -101,7 +101,10 @@ export type Health = {
   ok: boolean;
   paypal: string;
   riskModel: string | null;
+  agentModel: string | null;
   readOnlyTools: number;
+  readsAllowListed: number;
+  readsUnavailableHere: string[];
   gatedActions: number;
   demoTamperAvailable: boolean;
   usingDemoTokens: boolean;

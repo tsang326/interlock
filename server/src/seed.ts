@@ -154,8 +154,26 @@ const SCENARIO: Array<{ label: string; input: ProposalInput }> = [
   },
 ];
 
-/** Identical refunds in a row; once there are five in the window the rule blocks them. */
-const BURST_COUNT = 5;
+/**
+ * Identical refunds in a row. The rule blocks a refund once five others were filed in the
+ * ten minutes before it, so a burst has to be longer than five to show the rule firing:
+ * the first five are what a loop looks like before anyone could tell, and the sixth is
+ * where it stops being plausible. Spaced seconds apart, so they sit inside one window.
+ */
+const BURST_COUNT = 8;
+const BURST_SPACING_SECONDS = 45;
+
+/**
+ * How far apart the worked scenarios are filed. A queue whose every row arrived in the
+ * same second is not a queue, and the velocity rule reads it as one long burst — which
+ * then blocks the next honest refund, and inflates the risk floor of every row with a
+ * `repeat_burst` nothing in the story earns. Filed with the times they would really
+ * have, the rule sees a day's work.
+ */
+const SCENARIO_SPACING_MINUTES = 45;
+
+/** The burst happened recently, but not so recently that it overlaps the scenarios. */
+const BURST_ENDED_MINUTES_AGO = 15;
 const BURST: ProposalInput = {
   kind: 'create_refund',
   sessionId: 'agent-loop-99',
@@ -276,9 +294,16 @@ export async function seedDemo(
       : '  rules only: no model calls',
   );
 
-  for (const { label, input } of scenario) {
+  const now = Date.now();
+  const burstStart = now - (BURST_ENDED_MINUTES_AGO + (BURST_COUNT - 1) * (BURST_SPACING_SECONDS / 60)) * 60_000;
+  // Scenarios run from oldest to newest and finish well before the burst begins, so no
+  // window contains both.
+  const scenarioAt = (i: number) =>
+    new Date(burstStart - (scenario.length - i) * SCENARIO_SPACING_MINUTES * 60_000).toISOString();
+
+  for (const [i, { label, input }] of scenario.entries()) {
     try {
-      const proposal = await interlock.submit(input);
+      const proposal = await interlock.submit(input, { at: scenarioAt(i) });
       console.log(`  ${proposal.status.padEnd(9)} risk ${String(proposal.risk.score).padStart(3)}  ${label}`);
     } catch (error) {
       if (error instanceof SchemaRejection) console.log(`  rejected  ${label}: ${error.detail}`);
@@ -288,7 +313,10 @@ export async function seedDemo(
 
   console.log('\n  refund burst:');
   for (let i = 0; i < BURST_COUNT; i++) {
-    const proposal = await interlock.submit({ ...BURST, rationale: `Processing queued refund ${i + 1}.` });
+    const proposal = await interlock.submit(
+      { ...BURST, rationale: `Processing queued refund ${i + 1}.` },
+      { at: new Date(burstStart + i * BURST_SPACING_SECONDS * 1000).toISOString() },
+    );
     console.log(`  ${proposal.status.padEnd(9)} risk ${String(proposal.risk.score).padStart(3)}  burst #${i + 1}`);
   }
 

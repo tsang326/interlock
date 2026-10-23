@@ -9,6 +9,12 @@ import type { ActionKind, PolicyOutcome, RiskAssessment, Rule, RuleCondition } f
  */
 export type PolicyFacts = {
   kind: ActionKind;
+  /**
+   * When this proposal is being filed. A fact about the request, not a claim inside it:
+   * the API cannot set it, because `submit` takes it as a separate argument that only
+   * server-side callers (the seed) pass. Every velocity window is measured from here.
+   */
+  at: string;
   facts: DerivedFacts;
   mismatches: string[];
   /**
@@ -135,7 +141,7 @@ function conditionMatches(
   }
 
   if (when.velocity) {
-    const n = store.countRecentByKind(kind, when.velocity.windowMinutes);
+    const n = store.countRecentByKind(kind, when.velocity.windowMinutes, subject.at);
     if (n < when.velocity.countGte) return false;
   }
 

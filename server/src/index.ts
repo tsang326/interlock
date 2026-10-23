@@ -62,7 +62,8 @@ async function start(): Promise<void> {
   app.listen(config.port, () => {
     console.log(`Interlock listening on :${config.port}`);
     console.log(`  PayPal     ${paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'LIVE') : 'simulated'}`);
-    console.log(`  Risk model ${anthropicConfigured ? config.anthropic.model : 'heuristics only'}`);
+    console.log(`  Risk model ${anthropicConfigured ? config.anthropic.riskModel : 'heuristics only'}`);
+    console.log(`  Agent      ${anthropicConfigured ? config.anthropic.agentModel : 'no key; runs are refused'}`);
     console.log(`  Database   ${config.dbFile}`);
     console.log(`  Console    ${consoleBuilt ? 'served from web/dist' : 'not built; run pnpm build'}`);
   });

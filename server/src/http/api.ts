@@ -5,7 +5,13 @@ import { anthropicConfigured, config, paypalConfigured, usingDemoTokens } from '
 import type { Store } from '../core/db.js';
 import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
 import { InvalidTransition, SchemaRejection, type Interlock } from '../core/interlock.js';
-import { READABLE, resourceRef, type PayPalExecutor } from '../paypal/executor.js';
+import {
+  READABLE,
+  callableReads,
+  resourceRef,
+  unavailableReason,
+  type PayPalExecutor,
+} from '../paypal/executor.js';
 import { INBOX } from '../agent/inbox.js';
 import { runAgent } from '../agent/run.js';
 import { callerOf, requireRole } from './auth.js';
@@ -95,8 +101,14 @@ export function createApi(
     res.json({
       ok: true,
       paypal: paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'live') : 'simulated',
-      riskModel: anthropicConfigured ? config.anthropic.model : null,
-      readOnlyTools: READABLE.length,
+      riskModel: anthropicConfigured ? config.anthropic.riskModel : null,
+      agentModel: anthropicConfigured ? config.anthropic.agentModel : null,
+      // What is callable here, not what is allow-listed: two of the sixteen cannot
+      // answer in the sandbox, and a number a reviewer can disprove by clicking is
+      // worse than a smaller true one.
+      readOnlyTools: callableReads().length,
+      readsAllowListed: READABLE.length,
+      readsUnavailableHere: READABLE.filter((name) => unavailableReason(name) !== undefined),
       gatedActions: ACTION_KINDS.length,
       demoTamperAvailable: config.paypal.sandbox,
       usingDemoTokens,
@@ -205,6 +217,19 @@ export function createApi(
         error: 'not_readable',
         detail: `${tool} is not a read-only tool. Money-moving actions are filed as proposals, not called.`,
         readable: READABLE,
+      });
+      return;
+    }
+
+    // Allow-listed, but this deployment cannot answer it. Said plainly, with the reason
+    // and the list that does work, so the caller retries with a different tool instead
+    // of reading a 502 as "PayPal is down".
+    const unavailable = unavailableReason(tool);
+    if (unavailable) {
+      res.status(501).json({
+        error: 'unavailable_here',
+        detail: `${tool} is a read-only tool, but ${unavailable}.`,
+        callable: callableReads(),
       });
       return;
     }

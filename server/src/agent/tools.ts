@@ -1,7 +1,7 @@
 import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import * as z from 'zod/v4';
 import { ACTION_KINDS } from '../core/types.js';
-import { READABLE, type PayPalExecutor } from '../paypal/executor.js';
+import { callableReads, type PayPalExecutor } from '../paypal/executor.js';
 import type { InterlockClient } from './client.js';
 
 /**
@@ -18,9 +18,12 @@ const json = (value: unknown) => JSON.stringify(value, null, 2).slice(0, 6000);
  * One read tool rather than fifteen. The toolkit already ships a description for each
  * of its tools, written for a model to read, so the catalogue is built from those at
  * startup instead of being restated here and drifting.
+ *
+ * Only the reads this deployment can answer are listed. Offering the agent a tool that
+ * always fails buys nothing but a wasted turn and a confused transcript.
  */
 function readCatalogue(paypal: PayPalExecutor): string {
-  const lines = READABLE.map((name) => {
+  const lines = callableReads().map((name) => {
     const description = paypal.describe(name)?.split('\n')[0] ?? 'A read-only PayPal call.';
     return `- ${name}: ${description}`;
   });

@@ -32,7 +32,7 @@ const show = (label: string, p: Proposal) => {
 
 async function main() {
   console.log(`PayPal: ${paypalConfigured ? 'live sandbox' : 'simulated'}`);
-  console.log(`Risk model: ${anthropicConfigured ? config.anthropic.model : 'heuristics only'}\n`);
+  console.log(`Risk model: ${anthropicConfigured ? config.anthropic.riskModel : 'heuristics only'}\n`);
 
   console.log('1. Draft invoice - policy allows it, so it really hits PayPal');
   const invoice = await interlock.submit({

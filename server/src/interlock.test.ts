@@ -521,6 +521,47 @@ describe('the agent cannot decide its own proposals', () => {
     }
   });
 
+  test('a read this deployment cannot answer says so, rather than failing at PayPal', async () => {
+    const { base, close } = await serve();
+    try {
+      // Two of the sixteen allow-listed reads cannot answer in the sandbox: one needs a
+      // scope this app was never granted, the other is refused by the toolkit. They stay
+      // allow-listed, so the answer must name the reason and point at what does work —
+      // and the health count must not advertise them.
+      for (const tool of ['get_shipment_tracking', 'get_merchant_insights']) {
+        const response = await fetch(`${base}/api/paypal/read`, {
+          method: 'POST',
+          headers: { ...AGENT, 'content-type': 'application/json' },
+          body: JSON.stringify({ tool, params: {} }),
+        });
+        assert.equal(response.status, 501, `${tool} should answer with its reason`);
+        const body = (await response.json()) as {
+          error: string;
+          detail: string;
+          callable: string[];
+        };
+        assert.equal(body.error, 'unavailable_here');
+        assert.match(body.detail, /read-only tool, but /);
+        assert.ok(!body.callable.includes(tool), `${tool} should not be offered as callable`);
+        assert.ok(body.callable.includes('list_invoices'));
+      }
+
+      const health = (await (await fetch(`${base}/api/health`)).json()) as {
+        readOnlyTools: number;
+        readsAllowListed: number;
+        readsUnavailableHere: string[];
+      };
+      assert.equal(health.readsAllowListed, 16);
+      assert.equal(health.readOnlyTools, 14);
+      assert.deepEqual(health.readsUnavailableHere.sort(), [
+        'get_merchant_insights',
+        'get_shipment_tracking',
+      ]);
+    } finally {
+      close();
+    }
+  });
+
   test('every route but health refuses an unauthenticated caller', async () => {
     const s = await serve();
     try {
@@ -657,6 +698,68 @@ describe('the demo cannot be made to spend without a ceiling', () => {
       assert.deepEqual(health.agentRuns, { started: 0, budget: 3 });
     } finally {
       s.close();
+    }
+  });
+});
+
+describe('a burst is five in ten minutes, not five in the table', () => {
+  /**
+   * The velocity rule asks whether five of the same action were filed in the ten minutes
+   * before this one. Anchoring that window to the clock instead of to the proposal made
+   * the question "are there five in the table", which a seeded demo queue answers yes to
+   * for ever — blocking the next honest refund and inflating every risk floor with a
+   * `repeat_burst` nothing earned.
+   */
+  const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+
+  test('refunds filed well apart are not a burst, however many of them there are', async () => {
+    const interlock = new Interlock(freshStore('spread'), new StubExecutor());
+    // Nine refunds across six hours. Under a clock-anchored window the last ones block.
+    const statuses: string[] = [];
+    for (let i = 9; i >= 1; i--) {
+      const p = await interlock.submit(refund({}), { at: minutesAgo(i * 45) });
+      statuses.push(p.status);
+    }
+    assert.equal(
+      statuses.every((s) => s !== 'blocked'),
+      true,
+      `nothing spread 45 minutes apart should block, got ${statuses.join(',')}`,
+    );
+  });
+
+  test('six inside ten minutes is a burst, and the sixth is where it stops', async () => {
+    const interlock = new Interlock(freshStore('burst'), new StubExecutor());
+    const statuses: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      // 45 seconds apart, so all six sit inside one ten-minute window.
+      const p = await interlock.submit(refund({}), { at: new Date(Date.now() - (300 - i * 45) * 1000).toISOString() });
+      statuses.push(p.status);
+    }
+    assert.deepEqual(statuses.slice(0, 5).filter((s) => s === 'blocked'), []);
+    assert.equal(statuses[5], 'blocked');
+  });
+
+  test('the filing time is not something a caller can set', async () => {
+    const store = freshStore('backdate');
+    const interlock = new Interlock(store, new StubExecutor());
+    const app = createApi(store, interlock, new PayPalExecutor());
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    try {
+      // A caller that backdates its own proposals walks out of every velocity window.
+      const response = await fetch(`http://127.0.0.1:${port}/api/proposals`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer demo-agent-token', 'content-type': 'application/json' },
+        body: JSON.stringify({ ...refund({}), at: minutesAgo(10_000), createdAt: minutesAgo(10_000) }),
+      });
+      assert.equal(response.status, 201);
+      const filed = (await response.json()) as { createdAt: string };
+      const age = Date.now() - new Date(filed.createdAt).getTime();
+      assert.ok(age < 60_000, `the proposal should be filed now, not ${age}ms ago`);
+    } finally {
+      server.close();
     }
   });
 });

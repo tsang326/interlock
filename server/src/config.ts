@@ -1,5 +1,8 @@
 import 'dotenv/config';
 
+/** The model both jobs use unless one of them is pinned to something else. */
+const DEFAULT_MODEL = 'claude-opus-5-5';
+
 function optional(name: string): string | undefined {
   const v = process.env[name];
   return v && v.length > 0 ? v : undefined;
@@ -13,7 +16,14 @@ export const config = {
   },
   anthropic: {
     apiKey: optional('ANTHROPIC_API_KEY'),
-    model: process.env.INTERLOCK_MODEL ?? 'claude-opus-5-5',
+    // Two different jobs, so two settings. The agent is a multi-turn conversation that
+    // has to hold its nerve against a prompt injection in a customer's own words; risk
+    // scoring is one short structured call per proposal, and it is the one a development
+    // loop re-runs for every proposal in the queue. INTERLOCK_MODEL moves both at once;
+    // either job can be pinned on its own, and a cheaper model on one says nothing about
+    // the other. What a substitution costs in findings is measurable — see the README.
+    agentModel: process.env.INTERLOCK_AGENT_MODEL ?? process.env.INTERLOCK_MODEL ?? DEFAULT_MODEL,
+    riskModel: process.env.INTERLOCK_RISK_MODEL ?? process.env.INTERLOCK_MODEL ?? DEFAULT_MODEL,
   },
   auth: {
     // Demo defaults so a judge can run the project without inventing secrets. A real

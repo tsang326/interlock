@@ -405,12 +405,22 @@ export class Store {
     this.db.prepare(`UPDATE proposals SET ${sets.join(', ')} WHERE id = @id`).run(bind);
   }
 
-  /** Count of proposals of one kind created inside the window; drives velocity rules. */
-  countRecentByKind(kind: string, windowMinutes: number): number {
-    const since = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+  /**
+   * Count of proposals of one kind in the window before `before`; drives velocity rules.
+   *
+   * The window is anchored to the proposal being judged rather than to the clock, so the
+   * question is the one the rule actually asks — "were there five of these in the ten
+   * minutes before this one" — and it gets the same answer however long the row has been
+   * sitting in the queue. Anchoring to `Date.now()` instead made a seeded demo queue read
+   * as one giant burst, which blocked the next honest refund for ten minutes.
+   */
+  countRecentByKind(kind: string, windowMinutes: number, before: string): number {
+    const since = new Date(new Date(before).getTime() - windowMinutes * 60_000).toISOString();
     const row = this.db
-      .prepare('SELECT COUNT(*) AS n FROM proposals WHERE kind = ? AND created_at >= ?')
-      .get(kind, since) as { n: number };
+      .prepare(
+        'SELECT COUNT(*) AS n FROM proposals WHERE kind = ? AND created_at >= ? AND created_at < ?',
+      )
+      .get(kind, since, before) as { n: number };
     return row.n;
   }
 

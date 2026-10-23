@@ -49,9 +49,20 @@ export class Interlock {
     }
   }
 
-  async submit(input: ProposalInput): Promise<Proposal> {
+  /**
+   * Files a proposal: derive the facts, ask PayPal, score, decide, record.
+   *
+   * `options.at` backdates the filing, and exists for one caller — the seed, which has to
+   * build a queue that looks like a day's work rather than one burst in a single second.
+   * It is a second argument rather than a field on `ProposalInput` precisely so the HTTP
+   * route cannot reach it: that route passes the parsed body and nothing else, and the
+   * body schema has no such field. There is a test for both halves of that.
+   */
+  async submit(input: ProposalInput, options: { at?: string } = {}): Promise<Proposal> {
     const check = this.paypal.validate(input.kind, input.params);
     if (!check.ok) throw new SchemaRejection(check.error);
+
+    const createdAt = options.at ?? new Date().toISOString();
 
     // Everything downstream decides on these, never on what the agent said it was doing.
     const facts = deriveFacts(input.kind, input.params);
@@ -67,7 +78,7 @@ export class Interlock {
       this.paypal,
     );
 
-    const subject: PolicyFacts = { kind: input.kind, facts, mismatches, verification };
+    const subject: PolicyFacts = { kind: input.kind, at: createdAt, facts, mismatches, verification };
 
     const risk = await assessRisk(input, subject, this.store);
     const policy = evaluatePolicy(subject, risk, this.store);
@@ -75,7 +86,7 @@ export class Interlock {
     const proposal: Proposal = {
       ...input,
       id: `prop_${nanoid(12)}`,
-      createdAt: new Date().toISOString(),
+      createdAt,
       amount: facts.amount,
       amountStatus: facts.amountStatus,
       counterparty: facts.counterparty,

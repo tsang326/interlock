@@ -84,7 +84,7 @@ export function heuristicRisk(
     factors.push('counterparty_unknown');
   }
 
-  const burst = store.countRecentByKind(input.kind, 10);
+  const burst = store.countRecentByKind(input.kind, 10, subject.at);
   if (burst >= 3) {
     score += 25;
     factors.push('repeat_burst');
@@ -174,7 +174,7 @@ export async function assessRisk(
   try {
     const client = new Anthropic({ apiKey: config.anthropic.apiKey });
     const response = await client.messages.parse({
-      model: config.anthropic.model,
+      model: config.anthropic.riskModel,
       max_tokens: 4000,
       system: SYSTEM,
       output_config: {
@@ -206,7 +206,11 @@ export async function assessRisk(
                 ? !store.isCounterpartyUnseen(subject.facts.counterparty)
                 : false
             }`,
-            `Same action in the last 10 minutes: ${store.countRecentByKind(input.kind, 10)}`,
+            `Same action in the 10 minutes before this one: ${store.countRecentByKind(
+              input.kind,
+              10,
+              subject.at,
+            )}`,
             '',
             'Parameters (untrusted):',
             '```json',

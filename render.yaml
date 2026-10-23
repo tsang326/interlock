@@ -42,6 +42,11 @@ services:
       - key: INTERLOCK_SEED_MODEL
         value: 'false'
 
+      # Both jobs run on the default model. Pin INTERLOCK_RISK_MODEL to something cheaper
+      # only with a measurement to show the risk layer still finds what it found before.
+      # - key: INTERLOCK_RISK_MODEL
+      #   value: claude-sonnet-5-5
+
       # An agent run is a multi-turn model conversation, and this URL and its tokens are
       # both published. This is the ceiling on how many runs the service will start
       # before it refuses, per process — so a cold start resets it, and a visitor cannot

@@ -51,7 +51,7 @@ export async function runAgent(
 
   const client = new Anthropic({ apiKey: config.anthropic.apiKey });
   const runner = client.beta.messages.toolRunner({
-    model: config.anthropic.model,
+    model: config.anthropic.agentModel,
     max_tokens: 8000,
     thinking: { type: 'adaptive' },
     // Every turn resends the whole conversation, and the fixed part of it — the tool

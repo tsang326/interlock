@@ -72,12 +72,23 @@ Of the toolkit's 47 tools:
 | **the remaining 23** | never wired up, so they are not reachable at all |
 
 Plus one call the toolkit has no tool for — reading a capture — which Interlock makes against the
-REST API underneath. That is the sixteenth readable call and the reason the console says 16.
+REST API underneath. That is the sixteenth readable call.
+
+**The console says 14, not 16, and that is deliberate.** All sixteen are allow-listed, but two of
+them cannot answer from a sandbox app: `get_shipment_tracking` needs a scope this app was never
+granted and PayPal returns a bare 403, and `get_merchant_insights` is refused by the toolkit itself
+before a request is made. Asking for either gets `501 unavailable_here` naming the reason and
+listing what does work, and neither is offered to the agent or counted on screen. All sixteen were
+called against this app's own credentials on 2026-10-20 to establish which fourteen answer; on a
+live account with the scopes granted, the count is 16.
 
 That last row matters: Interlock is **default-deny**. `pay_order`, for example, exists in the toolkit
-and is simply not connected. The claim is not "we gate every dangerous tool" — it is "nothing
-reaches PayPal except through one function, and that function runs only for a proposal that has
-already been decided."
+and is simply not connected. The claim is not "we gate every dangerous tool" — it is "**no
+money-moving call reaches PayPal except through `executeApproved`, and it runs only for a proposal
+that has already been decided**". Reads reach PayPal by their own path, which moves nothing, and the
+demo seed is the one explicit exception: `server/src/seed.ts` calls `executeApproved` directly to
+create the invoices the queue is about, because there has to be something real to decide on before
+anyone has decided anything.
 
 ### The rule the whole design rests on
 
@@ -162,6 +173,18 @@ disagree, which is the useful part.
 
 If no Anthropic key is configured, the deterministic layer runs alone and every proposal is
 labelled as rules-only. Nothing silently loosens.
+
+**The two jobs are configured separately, because they are not the same job.** Scoring is one
+short structured call per proposal; the agent is a multi-turn conversation that has to hold its
+nerve against a prompt injection written in a customer's own words. `INTERLOCK_MODEL` sets both,
+`INTERLOCK_RISK_MODEL` and `INTERLOCK_AGENT_MODEL` pin one at a time, and the console names each
+model it is actually running rather than the one this file was written about. Scoring is also the
+call a development loop repeats for every proposal in the queue, so it is where a cheaper model
+saves the most — and the saving is measurable rather than assumed, since the two findings the
+model layer contributes (a recipient that does not match the counterparty the agent named, and a
+note that argues against its own rationale) either still appear on a substituted model or they do
+not. `pnpm seed --rules-only` rebuilds the queue with no model calls at all, which is the right
+tool while policy or verification is what changed.
 
 ### Two roles, because one would defeat the point
 
@@ -300,12 +323,21 @@ The seed runs on boot only when the queue is empty, so a restart never duplicate
 scenario and never disturbs a queue someone has been working in. Set
 `INTERLOCK_SEED_ON_BOOT=false` to leave a fresh database empty.
 
+**The seeded queue is filed with the times it would really have** — the worked scenarios
+across the preceding hours, the burst as one tight cluster. That is not decoration. A
+velocity window is measured from the proposal being judged, so a queue whose every row
+arrived in the same second reads as one long burst: it blocks the next honest refund for
+ten minutes, and puts a `repeat_burst` on rows that earned nothing of the kind. Filed
+honestly, the burst is the only thing inside a single window, and it is eight long because
+the rule blocks a refund once five others preceded it — so the first five are what a loop
+looks like before anyone could tell, and the sixth is where it stops.
+
 **The starting queue on a deployment is scored by the rules alone.** Without a disk it is
 rebuilt at every cold start, and scoring every proposal in it with the model each time the
 service wakes would let anyone visiting the URL spend the model budget, with no ceiling.
 Everything filed after boot — every agent run, every proposal you file by hand — is scored
 by both layers as normal. `INTERLOCK_SEED_MODEL=true` scores the starting queue too, and
-costs one model call per proposal in that queue — fifteen against a live sandbox, thirteen
+costs one model call per proposal in that queue — eighteen against a live sandbox, sixteen
 without.
 
 **The agent has a run budget, for the same reason.** A run is a multi-turn model
@@ -324,7 +356,7 @@ they were.
 pnpm --filter @interlock/server test
 ```
 
-32 tests, about a second and a half, no network and no model — because a guarantee that needs a language
+35 tests, about a second and a half, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
 running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
 being recorded as failed rather than executed, a refund larger than the capture it draws on being
@@ -383,9 +415,11 @@ A security tool that oversells itself is worse than none, so:
   `PARTIALLY_REFUNDED` but not how much of it is left, so Interlock knows the ceiling and not the
   headroom. It holds those for a human rather than guessing, which is correct and also means a
   legitimate second adjustment never runs unattended.
-- **`get_merchant_insights` is in the read set but the toolkit refuses it in sandbox**, so it is
-  unavailable in the demo. It is left in the list because it is read-only at the API level; the
-  sandbox restriction is the toolkit's, not Interlock's.
+- **Two of the sixteen reads cannot answer in sandbox.** `get_merchant_insights` is refused by the
+  toolkit outside live mode, and `get_shipment_tracking` needs a scope this app does not hold, so
+  PayPal answers 403. Both stay allow-listed — they are read-only at the API level and a live
+  account can call them — but they are not offered to the agent, not counted on screen, and asking
+  for one returns `501 unavailable_here` with the reason. Neither restriction is Interlock's.
 - **No rate limiting on anything except the agent.** Reads, proposals and decisions can be
   driven freely against the sandbox, deliberately, because nothing there is metered. The agent
   is, so it has a run budget and runs one at a time; see "Deploying". That is a spending
@@ -406,7 +440,8 @@ A security tool that oversells itself is worse than none, so:
   malformed request is refused while it is still cheap rather than at the moment money is meant to
   move.
 - **Claude Opus 5.5** via the Anthropic SDK, twice over: structured outputs for the risk layer,
-  and the beta tool runner with Zod-typed tools for the agent that files the proposals.
+  and the beta tool runner with Zod-typed tools for the agent that files the proposals. Each job
+  reads its own setting, so either can run on a different model; the console reports which.
 - **AG Grid Community** for the review queue, **React + Vite** for the console.
 - **TypeScript**, **Express**, **SQLite** (better-sqlite3), server-sent events for live updates.
 

@@ -101,10 +101,24 @@ export default function App() {
           <div>
             Risk model <b>{health?.riskModel ?? 'heuristics only'}</b>
           </div>
+          {/* Only worth a line of its own when the two jobs are not on the same model. */}
+          {health?.agentModel && health.agentModel !== health.riskModel && (
+            <div>
+              Agent model <b>{health.agentModel}</b>
+            </div>
+          )}
           <div>
             Gated actions <b>{health?.gatedActions ?? '—'}</b>
           </div>
-          <div>
+          <div
+            title={
+              health?.readsUnavailableHere?.length
+                ? `${health.readsAllowListed} reads are allow-listed; ${health.readsUnavailableHere.join(
+                    ' and ',
+                  )} cannot answer in the sandbox, so they are not offered.`
+                : undefined
+            }
+          >
             Agent-callable reads <b>{health?.readOnlyTools ?? '—'}</b>
           </div>
           {token && (
