@@ -346,6 +346,14 @@ export function createApi(
     res.json({ edited, verification: store.verifyChain() });
   });
 
+  app.post('/api/audit/demo-restore', requireRole('reviewer'), (_req, res) => {
+    if (!config.paypal.sandbox) {
+      res.status(403).json({ error: 'demo_only', detail: 'Not available outside the sandbox.' });
+      return;
+    }
+    res.json({ restored: store.demoRestore(), verification: store.verifyChain() });
+  });
+
   /* ---- live updates ---- */
 
   app.get('/api/events', (req: Request, res: Response) => {

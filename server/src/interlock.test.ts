@@ -457,6 +457,22 @@ describe('the audit chain', () => {
     raw.close();
   });
 
+  test('the demo tamper breaks the chain and the demo restore puts it back exactly', () => {
+    const store = freshStore('tamper-restore');
+    store.append('proposal.created', 'agent', { a: 1 }, 'p1');
+    store.append('proposal.approved', 'sang', { note: 'ok' }, 'p1');
+    store.append('proposal.executed', 'interlock', { live: false }, 'p1');
+
+    const edited = store.demoTamper();
+    store.demoTamper(); // a second tamper must not overwrite the saved original
+    assert.equal(store.verifyChain().ok, false);
+    assert.equal(store.verifyChain().brokenAt, edited!.seq);
+
+    assert.deepEqual(store.demoRestore(), [edited!.seq]);
+    assert.equal(store.verifyChain().ok, true);
+    assert.deepEqual(store.demoRestore(), []);
+  });
+
   test('KNOWN LIMIT: truncating the tail is not detectable from inside the chain', () => {
     const store = freshStore('truncate');
     store.append('proposal.created', 'agent', { a: 1 }, 'p1');

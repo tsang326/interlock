@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS audit (
   prev_hash   TEXT NOT NULL,
   hash        TEXT NOT NULL
 );
+
+-- What the demo tamper overwrote, so the demo can be put back. Outside the chain on purpose.
+CREATE TABLE IF NOT EXISTS demo_tamper (
+  seq      INTEGER PRIMARY KEY,
+  original TEXT NOT NULL
+);
 `;
 
 const GENESIS_HASH = '0'.repeat(64);
@@ -481,11 +487,27 @@ export class Store {
       .prepare("SELECT seq, payload FROM audit WHERE type != 'policy.updated' ORDER BY seq ASC LIMIT 1 OFFSET 1")
       .get() as { seq: number; payload: string } | undefined;
     if (!row) return undefined;
+    // Keep the first original only: tampering twice must still restore what was there before
+    this.db.prepare('INSERT OR IGNORE INTO demo_tamper (seq, original) VALUES (?, ?)').run(row.seq, row.payload);
     const payload = JSON.parse(row.payload) as Record<string, unknown>;
     payload.amount = { value: 1, currency: 'USD' };
     payload.tamperedBy = 'demo';
     this.db.prepare('UPDATE audit SET payload = ? WHERE seq = ?').run(JSON.stringify(payload), row.seq);
     return { seq: row.seq, field: 'payload.amount' };
+  }
+
+  /**
+   * Undoes `demoTamper` by writing back the exact bytes it replaced. On a public demo one
+   * visitor's tamper would otherwise leave a broken chain for every visitor after them.
+   */
+  demoRestore(): number[] {
+    const rows = this.db.prepare('SELECT seq, original FROM demo_tamper ORDER BY seq').all() as { seq: number; original: string }[];
+    const write = this.db.prepare('UPDATE audit SET payload = ? WHERE seq = ?');
+    this.db.transaction(() => {
+      for (const r of rows) write.run(r.original, r.seq);
+      this.db.prepare('DELETE FROM demo_tamper').run();
+    })();
+    return rows.map((r) => r.seq);
   }
 
   countRules(): number {

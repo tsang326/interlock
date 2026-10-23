@@ -200,6 +200,10 @@ export const api = {
       '/api/audit/demo-tamper',
       { method: 'POST' },
     ),
+  demoRestore: () =>
+    request<{ restored: number[]; verification: ChainVerification }>('/api/audit/demo-restore', {
+      method: 'POST',
+    }),
 };
 
 /**

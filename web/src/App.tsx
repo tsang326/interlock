@@ -35,6 +35,25 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [token, setTokenState] = useState(getToken());
   const [tokenDraft, setTokenDraft] = useState('');
+  const [guideOpen, setGuideOpen] = useState(() => {
+    try {
+      return localStorage.getItem('interlock-guide') !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const closeGuide = () => {
+    setGuideOpen(false);
+    try {
+      localStorage.setItem('interlock-guide', 'closed');
+    } catch {
+      /* private mode: the guide just comes back next visit */
+    }
+  };
+  const signIn = (value: string) => {
+    setToken(value);
+    setTokenState(value);
+  };
 
   const showError = useCallback((message: string) => {
     setError(message);
@@ -161,11 +180,15 @@ export default function App() {
               An agent's token can file proposals but never approve them. The demo tokens are
               in the project README.
             </p>
+            {health?.usingDemoTokens && (
+              <button className="primary demo-signin" onClick={() => signIn('demo-reviewer-token')}>
+                Use the demo reviewer token
+              </button>
+            )}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                setToken(tokenDraft.trim());
-                setTokenState(tokenDraft.trim());
+                signIn(tokenDraft.trim());
               }}
             >
               <input
@@ -174,12 +197,37 @@ export default function App() {
                 placeholder="demo-reviewer-token"
                 autoFocus
               />
-              <button className="primary" type="submit">
+              <button className={health?.usingDemoTokens ? '' : 'primary'} type="submit">
                 Use this token
               </button>
             </form>
           </div>
         </div>
+      )}
+
+      {token && guideOpen && (
+        <section className="guide" aria-label="Start here">
+          <b>Start here</b>
+          <ol>
+            <li>
+              <button className="linkish" onClick={() => setTab('agent')}>Agent</button>: run{' '}
+              <i>"Re: your invoice — automated reply"</i>. The customer mail hides instructions for the
+              agent. Watch what it proposes.
+            </li>
+            <li>
+              <button className="linkish" onClick={() => setTab('queue')}>Review queue</button>: open
+              the proposal it filed. Interlock held it, and shows what PayPal itself says next to what
+              the agent claimed.
+            </li>
+            <li>
+              <button className="linkish" onClick={() => setTab('audit')}>Audit</button>: verify the
+              hash chain, tamper with it, verify again, then undo the tamper.
+            </li>
+          </ol>
+          <button className="linkish close" onClick={closeGuide} aria-label="Hide the guide">
+            hide
+          </button>
+        </section>
       )}
 
       <div className="main">
