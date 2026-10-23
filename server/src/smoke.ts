@@ -6,7 +6,7 @@
  * verifies afterwards. Run with: pnpm --filter @interlock/server exec tsx src/smoke.ts
  */
 import { existsSync, unlinkSync } from 'node:fs';
-import { config, anthropicConfigured, paypalConfigured } from './config.js';
+import { config, modelConfigured, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
 import { Interlock, SchemaRejection } from './core/interlock.js';
@@ -32,7 +32,7 @@ const show = (label: string, p: Proposal) => {
 
 async function main() {
   console.log(`PayPal: ${paypalConfigured ? 'live sandbox' : 'simulated'}`);
-  console.log(`Risk model: ${anthropicConfigured ? config.anthropic.riskModel : 'heuristics only'}\n`);
+  console.log(`Risk model: ${modelConfigured ? config.model.riskModel : 'heuristics only'}\n`);
 
   console.log('1. Draft invoice - policy allows it, so it really hits PayPal');
   const invoice = await interlock.submit({

@@ -30,7 +30,7 @@ services:
 
       # The risk model and the agent. Without this the deterministic layer runs alone,
       # every proposal is labelled rules-only, and the Agent tab says why it cannot run.
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
 
       # The free plan has no disk, so the queue is rebuilt at every cold start. Scoring
@@ -45,7 +45,7 @@ services:
       # Both jobs run on the default model. Pin INTERLOCK_RISK_MODEL to something cheaper
       # only with a measurement to show the risk layer still finds what it found before.
       # - key: INTERLOCK_RISK_MODEL
-      #   value: claude-sonnet-5-5
+      #   value: gpt-4.1-mini
 
       # An agent run is a multi-turn model conversation, and this URL and its tokens are
       # both published. This is the ceiling on how many runs the service will start

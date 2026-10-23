@@ -3,7 +3,7 @@
  *
  * Every test here runs with the risk model switched off, because the guarantee must not
  * depend on a language model agreeing with us. The `pnpm test` script blanks
- * ANTHROPIC_API_KEY before this module loads; setting it here would be too late, since
+ * OPENAI_API_KEY before this module loads; setting it here would be too late, since
  * config.ts reads the environment at import time.
  *
  * Run with: pnpm test

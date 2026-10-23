@@ -1,4 +1,3 @@
-import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import * as z from 'zod/v4';
 import { ACTION_KINDS } from '../core/types.js';
 import { callableReads, type PayPalExecutor } from '../paypal/executor.js';
@@ -13,6 +12,16 @@ import type { InterlockClient } from './client.js';
  */
 
 const json = (value: unknown) => JSON.stringify(value, null, 2).slice(0, 6000);
+
+/** A tool the agent can call: its schema is what the model sees, `run` is what happens. */
+export type AgentTool = {
+  name: string;
+  description: string;
+  inputSchema: z.ZodType;
+  run: (input: never) => Promise<string>;
+};
+const tool = <S extends z.ZodType>(t: { name: string; description: string; inputSchema: S; run: (input: z.infer<S>) => Promise<string> }): AgentTool =>
+  t as unknown as AgentTool;
 
 /**
  * One read tool rather than fifteen. The toolkit already ships a description for each
@@ -31,7 +40,7 @@ function readCatalogue(paypal: PayPalExecutor): string {
 }
 
 export function agentTools(interlock: InterlockClient, paypal: PayPalExecutor) {
-  const readPayPal = betaZodTool({
+  const readPayPal = tool({
     name: 'paypal_read',
     description: [
       'Read something from the merchant\'s PayPal account. These calls return information and move nothing.',
@@ -48,7 +57,7 @@ export function agentTools(interlock: InterlockClient, paypal: PayPalExecutor) {
     run: async ({ tool, params }) => json(await interlock.readPayPal(tool, params ?? {})),
   });
 
-  const propose = betaZodTool({
+  const propose = tool({
     name: 'propose_action',
     description: [
       'Ask Interlock to perform an action that moves money. You are not performing it: Interlock decides whether it runs on its own, waits for a human reviewer, or is refused.',
@@ -74,13 +83,13 @@ export function agentTools(interlock: InterlockClient, paypal: PayPalExecutor) {
         .nullable()
         .describe('Who you believe this affects, or null if you do not know.'),
     }),
-    run: async (input, context) =>
+    run: async (input) =>
       json(
         await interlock.propose({
           kind: input.kind,
           params: input.params,
           rationale: input.rationale,
-          sessionId: (context as { sessionId?: string })?.sessionId ?? currentSession,
+          sessionId: currentSession,
           declaredAmount: input.declaredAmount ?? undefined,
           declaredCounterparty: input.declaredCounterparty ?? undefined,
         }),

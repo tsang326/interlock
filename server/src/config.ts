@@ -1,7 +1,10 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+
+// The server runs from server/ under pnpm, but the README puts .env at the repo root: read both
+loadEnv({ path: ['.env', '../.env'], quiet: true });
 
 /** The model both jobs use unless one of them is pinned to something else. */
-const DEFAULT_MODEL = 'claude-opus-5-5';
+const DEFAULT_MODEL = 'gpt-4.1';
 
 function optional(name: string): string | undefined {
   const v = process.env[name];
@@ -14,8 +17,9 @@ export const config = {
     clientSecret: optional('PAYPAL_CLIENT_SECRET'),
     sandbox: process.env.PAYPAL_SANDBOX !== 'false',
   },
-  anthropic: {
-    apiKey: optional('ANTHROPIC_API_KEY'),
+  model: {
+    apiKey: optional('OPENAI_API_KEY'),
+    baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
     // Two different jobs, so two settings. The agent is a multi-turn conversation that
     // has to hold its nerve against a prompt injection in a customer's own words; risk
     // scoring is one short structured call per proposal, and it is the one a development
@@ -47,7 +51,7 @@ export const config = {
 export const paypalConfigured = Boolean(config.paypal.clientId && config.paypal.clientSecret);
 
 /** True when risk scoring can use the model; otherwise it falls back to heuristics. */
-export const anthropicConfigured = Boolean(config.anthropic.apiKey);
+export const modelConfigured = Boolean(config.model.apiKey);
 
 /** True when the tokens are still the published demo values. */
 export const usingDemoTokens =

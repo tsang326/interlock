@@ -53,7 +53,7 @@ and subscriptions, where the money leaves the merchant's own account.
                                       │
    ┌──────────┐   proposes   ┌────────┴─────────┐   approved only   ┌─────────┐
    │  Agent   │ ───────────► │    Interlock     │ ────────────────► │ PayPal  │
-   │ (Claude) │              │  policy + review │                   │   API   │
+   │ (gpt-4.1)│              │  policy + review │                   │   API   │
    └──────────┘              └────────┬─────────┘ ◄──────────────── └─────────┘
         │                             │            what PayPal         ▲
         │  reads freely          ┌────┴────┐       actually holds      │
@@ -162,7 +162,7 @@ A deterministic layer always runs: action type, amount bands, a counterparty nev
 repeated actions in a short window, and whether the agent's account of the action matches the
 request. It sets a floor.
 
-Claude (`claude-opus-5-5`) then reads the specific request and may **raise** the score. It can
+A model (`gpt-4.1` by default) then reads the specific request and may **raise** the score. It can
 never lower the floor, and it can never approve anything. Its own instructions treat the agent's
 rationale as attacker-controlled data: an agent reads customer emails and invoice notes, so text
 arguing for approval is treated as evidence of a problem rather than a reason.
@@ -171,7 +171,7 @@ The review screen shows both numbers. A reviewer should know whether an alarm ca
 that always fires the same way or from the model reading this one request — and sometimes they
 disagree, which is the useful part.
 
-If no Anthropic key is configured, the deterministic layer runs alone and every proposal is
+If no OpenAI key is configured, the deterministic layer runs alone and every proposal is
 labelled as rules-only. Nothing silently loosens.
 
 **The two jobs are configured separately, because they are not the same job.** Scoring is one
@@ -263,7 +263,7 @@ Requires Node 24 and pnpm. (better-sqlite3 is a native module, so the Node versi
 
 ```bash
 pnpm install
-cp .env.example .env     # PayPal sandbox credentials; the Anthropic key is optional
+cp .env.example .env     # PayPal sandbox credentials; the OpenAI key is optional
 pnpm --filter @interlock/server seed     # fills the review queue with a worked scenario
 pnpm dev                               # API on :8787, UI on http://localhost:5173
 pnpm --filter @interlock/server agent    # optional: run the agent against the demo inbox
@@ -274,7 +274,7 @@ and files proposals against them. It also refers to two captures from the sandbo
 built in; point it at your own with `INTERLOCK_DEMO_CAPTURE` and `INTERLOCK_DEMO_PART_REFUNDED`,
 or leave them and those scenarios will show as unverifiable, which is the honest result.
 
-The agent needs `ANTHROPIC_API_KEY` and a running server. Interlock itself needs neither.
+The agent needs `OPENAI_API_KEY` and a running server. Interlock itself needs neither.
 
 ### Signing in
 
@@ -300,14 +300,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 
 Get sandbox credentials from the [PayPal developer dashboard](https://developer.paypal.com/dashboard/)
 (Apps & Credentials → Sandbox). Without them Interlock still runs; approved actions are simulated and
-labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the deterministic layer.
+labelled as such. Without an `OPENAI_API_KEY`, risk scoring falls back to the deterministic layer.
 
 ### Deploying
 
 `render.yaml` deploys the whole thing as one Render service: the API serves the built
 console, so there is one origin and one URL. Create it from the dashboard with **New →
 Blueprint**, point it at this repo, and Render will prompt for the three secrets — the
-PayPal sandbox pair and the Anthropic key. Everything else is in the file.
+PayPal sandbox pair and the OpenAI key. Everything else is in the file.
 
 Two things about the free plan, both deliberate rather than hidden:
 
@@ -439,8 +439,9 @@ A security tool that oversells itself is worse than none, so:
   Proposal parameters are validated against the toolkit's own schemas at proposal time, so a
   malformed request is refused while it is still cheap rather than at the moment money is meant to
   move.
-- **Claude Opus 5.5** via the Anthropic SDK, twice over: structured outputs for the risk layer,
-  and the beta tool runner with Zod-typed tools for the agent that files the proposals. Each job
+- **OpenAI gpt-4.1** over the Chat Completions HTTP API (no SDK), twice over: strict JSON-schema
+  output for the risk layer, and function calling with Zod-validated tools for the agent that files
+  the proposals (`server/src/model.ts`, `server/src/agent/run.ts`). Each job
   reads its own setting, so either can run on a different model; the console reports which.
 - **AG Grid Community** for the review queue, **React + Vite** for the console.
 - **TypeScript**, **Express**, **SQLite** (better-sqlite3), server-sent events for live updates.

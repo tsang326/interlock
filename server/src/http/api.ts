@@ -1,7 +1,7 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
-import { anthropicConfigured, config, paypalConfigured, usingDemoTokens } from '../config.js';
+import { modelConfigured, config, paypalConfigured, usingDemoTokens } from '../config.js';
 import type { Store } from '../core/db.js';
 import { ACTION_KINDS, type ProposalStatus } from '../core/types.js';
 import { InvalidTransition, SchemaRejection, type Interlock } from '../core/interlock.js';
@@ -101,8 +101,8 @@ export function createApi(
     res.json({
       ok: true,
       paypal: paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'live') : 'simulated',
-      riskModel: anthropicConfigured ? config.anthropic.riskModel : null,
-      agentModel: anthropicConfigured ? config.anthropic.agentModel : null,
+      riskModel: modelConfigured ? config.model.riskModel : null,
+      agentModel: modelConfigured ? config.model.agentModel : null,
       // What is callable here, not what is allow-listed: two of the sixteen cannot
       // answer in the sandbox, and a number a reviewer can disprove by clicking is
       // worse than a smaller true one.
@@ -119,7 +119,7 @@ export function createApi(
   /* ---- the agent ---- */
 
   app.get('/api/agent/inbox', requireRole('agent', 'reviewer'), (_req, res) => {
-    res.json({ tasks: INBOX, available: anthropicConfigured });
+    res.json({ tasks: INBOX, available: modelConfigured });
   });
 
   /**
@@ -165,10 +165,10 @@ export function createApi(
       });
       return;
     }
-    if (!anthropicConfigured) {
+    if (!modelConfigured) {
       res.status(503).json({
         error: 'no_model',
-        detail: 'The agent needs ANTHROPIC_API_KEY. Interlock itself runs without one.',
+        detail: 'The agent needs OPENAI_API_KEY. Interlock itself runs without one.',
       });
       return;
     }
