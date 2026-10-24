@@ -23,8 +23,8 @@ import type { ProposalInput } from './core/types.js';
  * Override either with INTERLOCK_DEMO_CAPTURE / INTERLOCK_DEMO_PART_REFUNDED to point the demo
  * at captures in your own sandbox.
  */
-const CAPTURE = process.env.INTERLOCK_DEMO_CAPTURE ?? '11F28618GB587605W';
-const PART_REFUNDED = process.env.INTERLOCK_DEMO_PART_REFUNDED ?? '9CG69063AL531292H';
+export const CAPTURE = process.env.INTERLOCK_DEMO_CAPTURE ?? '97H84399YC068270R';
+export const PART_REFUNDED = process.env.INTERLOCK_DEMO_PART_REFUNDED ?? '1SH756385W667132X';
 
 const SCENARIO: Array<{ label: string; input: ProposalInput }> = [
   {
