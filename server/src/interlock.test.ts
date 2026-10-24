@@ -202,6 +202,26 @@ describe('policy never decides on what the agent says about itself', () => {
     assert.equal(proposal.amountStatus, 'unverifiable');
   });
 
+  test('a high score never runs unattended, even with the high-risk rule set to auto-approve', async () => {
+    const store = freshStore('highrisk');
+    for (const rule of store.listRules()) {
+      if (rule.id === 'review-high-risk-score') store.upsertRule({ ...rule, then: 'auto_approve' });
+    }
+    // PayPal confirms the capture, so the amount is known: only the score stands in the way
+    const interlock = new Interlock(store, new StubExecutor('succeed', captureOf('860.00')));
+    // Three refunds just before it put the fourth in a burst, which is what lifts it past 70
+    for (let i = 0; i < 3; i++) await interlock.submit(refund({ declaredAmount: { value: 5, currency: 'USD' }, params: { capture_id: CAPTURE, amount: { currency_code: 'USD', value: '5.00' } } }))
+    const proposal = await interlock.submit(
+      refund({
+        declaredAmount: { value: 860, currency: 'USD' },
+        params: { capture_id: CAPTURE, amount: { currency_code: 'USD', value: '860.00' } },
+      }),
+    );
+    assert.ok(proposal.risk.score >= 70, `score ${proposal.risk.score}`);
+    assert.equal(proposal.status, 'pending');
+    assert.ok(proposal.policy.matchedRules.includes('guard:high-risk'));
+  });
+
   test('the guard holds even when an operator disables the risk rule', async () => {
     const store = freshStore('guard');
     for (const rule of store.listRules()) {

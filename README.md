@@ -112,6 +112,11 @@ human. An amount nobody could establish can never satisfy an auto-approve rule �
 rule says so, but because a guard outside the rule set says so, since rules are editable from the
 console and this must not be.
 
+The same guards hold anything scored 70 or above, whatever the rules say. The model can only raise
+a score, so this is what makes "the model never approves" true even after someone edits a rule to
+auto-approve high-risk actions: raising a score can push an action towards a human, never towards
+execution.
+
 ### The third account: what PayPal itself says
 
 Reading the request harder solves only half the problem. Some facts are not in the request at
@@ -358,7 +363,7 @@ they were.
 pnpm --filter @interlock/server test
 ```
 
-37 tests, about a second and a half, no network and no model — because a guarantee that needs a language
+38 tests, about a second and a half, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
 running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
 being recorded as failed rather than executed, a refund larger than the capture it draws on being
