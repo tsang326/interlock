@@ -56,12 +56,12 @@ export const DEFAULT_RULES: Rule[] = [
   },
   {
     id: 'review-high-risk-score',
-    name: 'Model flagged high risk',
+    name: 'Risk score 70 or higher',
     enabled: true,
     priority: 30,
     when: { riskScoreGte: 70 },
     then: 'needs_review',
-    reason: 'Risk assessment scored this at 70 or above.',
+    reason: 'The risk score (rules, raised by the model when it runs) is 70 or above.',
   },
   {
     id: 'allow-invoice-drafting',
@@ -195,14 +195,15 @@ function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyO
     };
   }
 
-  // Interlock asked PayPal and got no answer. The request's own amount is a ceiling, not a
+  // Interlock asked PayPal and could not establish the amount: the call failed, or PayPal
+  // answered without the figure this action needs (a partly refunded capture, say). The request's own amount is a ceiling, not a
   // proof: it cannot say the resource exists, is in a state the action can be applied
   // to, or has anything left. Acting unattended on strictly less information than the
   // design calls for is the same mistake as trusting the agent's word, one step removed.
   if (subject.verification.status === 'unavailable') {
     return {
       decision: 'needs_review',
-      matchedRules: [...outcome.matchedRules, 'guard:paypal-unreachable'],
+      matchedRules: [...outcome.matchedRules, 'guard:paypal-unconfirmed'],
       reason: `Held despite "${outcome.reason}" — PayPal could not confirm what this action touches. ${subject.verification.error ?? 'The lookup failed.'}`,
     };
   }

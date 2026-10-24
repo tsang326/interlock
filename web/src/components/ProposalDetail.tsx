@@ -11,7 +11,7 @@ const fmt = (m: { value: number; currency: string }) =>
 const VERDICT: Record<Proposal['verification']['status'], string> = {
   confirmed: 'confirmed, no amount',
   contradicted: 'contradicts the request',
-  unavailable: 'could not be asked',
+  unavailable: 'amount not confirmed',
   not_applicable: 'nothing to ask yet',
 };
 
@@ -97,8 +97,8 @@ export function ProposalDetail({ proposal, busy, onApprove, onReject }: Props) {
         ))}
         {v.error && (
           <div style={{ marginTop: 6, color: 'var(--muted)' }}>
-            PayPal could not be asked: {v.error} Silence is recorded as unknown, never as
-            approval.
+            PayPal could not confirm the amount: {v.error} An unknown amount is recorded as
+            unknown, never as approval.
           </div>
         )}
         <div className="mono" style={{ marginTop: 8, color: 'var(--muted)', fontSize: 12 }}>

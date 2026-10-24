@@ -339,7 +339,7 @@ describe('what PayPal itself says', () => {
     assert.equal(proposal.verification.status, 'unavailable');
     assert.match(proposal.verification.error ?? '', /remainder/i);
     assert.equal(proposal.status, 'pending');
-    assert.ok(proposal.policy.matchedRules.includes('guard:paypal-unreachable'));
+    assert.ok(proposal.policy.matchedRules.includes('guard:paypal-unconfirmed'));
     assert.equal(executor.calls.length, 0);
   });
 

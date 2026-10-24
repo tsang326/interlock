@@ -121,7 +121,7 @@ function describeVerification(subject: PolicyFacts): string {
     case 'not_applicable':
       return 'nothing to look up — this action creates the resource it describes.';
     case 'unavailable':
-      return `could not be asked (${v.source ?? 'lookup'}): ${v.error ?? 'the call failed'}. Treat the amount as unknown, not as fine.`;
+      return `could not confirm the amount (${v.source ?? 'lookup'}): ${v.error ?? 'the call failed'}. Treat the amount as unknown, not as fine.`;
     case 'contradicted':
       return `CONTRADICTS THE REQUEST via ${v.source}. ${v.findings.join(' ')}`;
     case 'confirmed':

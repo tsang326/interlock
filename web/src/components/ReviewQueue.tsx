@@ -72,7 +72,9 @@ function AmountCell({ data }: { data?: Proposal }) {
   // PayPal disagreeing, then PayPal supplying what the request lacked, then the
   // agent's claim where it differs from the request.
   let note: string | undefined;
-  if (contradicted) note = `PayPal: ${fromPayPal ?? 'disagrees'} ✕`;
+  // When the figures agree, the contradiction is about the resource's state (an invoice
+  // still in DRAFT, say): show that, not an amount that looks equal to the request's
+  if (contradicted) note = `PayPal: ${fromPayPal && fromPayPal !== derived ? fromPayPal : (data.verification.resourceState ?? 'disagrees')} ✕`;
   // A lookup that was attempted and failed matters even when the request carries a
   // figure: that figure is a ceiling, not proof there is anything left to refund.
   else if (data.verification.status === 'unavailable') note = 'PayPal could not confirm';
