@@ -9,6 +9,12 @@ import type { ActionKind, PolicyOutcome, RiskAssessment, Rule, RuleCondition } f
  */
 export type PolicyFacts = {
   kind: ActionKind;
+  /**
+   * When this proposal is being filed. A fact about the request, not a claim inside it:
+   * the API cannot set it, because `submit` takes it as a separate argument that only
+   * server-side callers (the seed) pass. Every velocity window is measured from here.
+   */
+  at: string;
   facts: DerivedFacts;
   mismatches: string[];
   /**
@@ -50,12 +56,12 @@ export const DEFAULT_RULES: Rule[] = [
   },
   {
     id: 'review-high-risk-score',
-    name: 'Model flagged high risk',
+    name: 'Risk score 70 or higher',
     enabled: true,
     priority: 30,
     when: { riskScoreGte: 70 },
     then: 'needs_review',
-    reason: 'Risk assessment scored this at 70 or above.',
+    reason: 'The risk score (rules, raised by the model when it runs) is 70 or above.',
   },
   {
     id: 'allow-invoice-drafting',
@@ -135,7 +141,7 @@ function conditionMatches(
   }
 
   if (when.velocity) {
-    const n = store.countRecentByKind(kind, when.velocity.windowMinutes);
+    const n = store.countRecentByKind(kind, when.velocity.windowMinutes, subject.at);
     if (n < when.velocity.countGte) return false;
   }
 
@@ -158,7 +164,7 @@ export function evaluatePolicy(
     break;
   }
 
-  return guardAutoApprove(outcome, subject);
+  return guardAutoApprove(outcome, subject, risk);
 }
 
 /**
@@ -169,7 +175,10 @@ export function evaluatePolicy(
  * and the agent's account of it matched. An amount PayPal will decide for us (a refund
  * with no amount takes the whole capture) is not a small amount; it is an unknown one.
  */
-function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyOutcome {
+/** At or above this risk score nothing runs unattended, whatever the rules say. */
+export const HIGH_RISK_NEVER_UNATTENDED = 70;
+
+function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts, risk: RiskAssessment): PolicyOutcome {
   if (outcome.decision !== 'auto_approve') return outcome;
 
   if (subject.mismatches.length > 0) {
@@ -189,14 +198,15 @@ function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyO
     };
   }
 
-  // Interlock asked PayPal and got no answer. The request's own amount is a ceiling, not a
+  // Interlock asked PayPal and could not establish the amount: the call failed, or PayPal
+  // answered without the figure this action needs (a partly refunded capture, say). The request's own amount is a ceiling, not a
   // proof: it cannot say the resource exists, is in a state the action can be applied
   // to, or has anything left. Acting unattended on strictly less information than the
   // design calls for is the same mistake as trusting the agent's word, one step removed.
   if (subject.verification.status === 'unavailable') {
     return {
       decision: 'needs_review',
-      matchedRules: [...outcome.matchedRules, 'guard:paypal-unreachable'],
+      matchedRules: [...outcome.matchedRules, 'guard:paypal-unconfirmed'],
       reason: `Held despite "${outcome.reason}" — PayPal could not confirm what this action touches. ${subject.verification.error ?? 'The lookup failed.'}`,
     };
   }
@@ -208,6 +218,17 @@ function guardAutoApprove(outcome: PolicyOutcome, subject: PolicyFacts): PolicyO
       decision: 'needs_review',
       matchedRules: [...outcome.matchedRules, 'guard:unverifiable-amount'],
       reason: `Held despite "${outcome.reason}" — the amount could not be established, so no amount rule can bound it. ${subject.facts.notes.join(' ')}`,
+    };
+  }
+
+  // Last, so the specific guards above name the reason when they apply. The model can only
+  // raise a score. Holding anything scored this high means raising it can
+  // push an action towards a human and never towards execution, even with the rules edited.
+  if (risk.score >= HIGH_RISK_NEVER_UNATTENDED) {
+    return {
+      decision: 'needs_review',
+      matchedRules: [...outcome.matchedRules, 'guard:high-risk'],
+      reason: `Held despite "${outcome.reason}" — risk ${risk.score} is at or above ${HIGH_RISK_NEVER_UNATTENDED}, and nothing that high runs without a human.`,
     };
   }
 

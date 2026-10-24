@@ -30,7 +30,7 @@ services:
 
       # The risk model and the agent. Without this the deterministic layer runs alone,
       # every proposal is labelled rules-only, and the Agent tab says why it cannot run.
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
 
       # The free plan has no disk, so the queue is rebuilt at every cold start. Scoring
@@ -41,6 +41,11 @@ services:
       # you want to pay for the starting queue too.
       - key: INTERLOCK_SEED_MODEL
         value: 'false'
+
+      # Both jobs run on the default model. Pin INTERLOCK_RISK_MODEL to something cheaper
+      # only with a measurement to show the risk layer still finds what it found before.
+      # - key: INTERLOCK_RISK_MODEL
+      #   value: gpt-4.1-mini
 
       # An agent run is a multi-turn model conversation, and this URL and its tokens are
       # both published. This is the ceiling on how many runs the service will start
@@ -60,9 +65,9 @@ services:
       # if you are running a copy; left unset, those scenarios show as unverifiable,
       # which is the honest result rather than a broken one.
       - key: INTERLOCK_DEMO_CAPTURE
-        value: 11F28618GB587605W
+        value: '97H84399YC068270R'
       - key: INTERLOCK_DEMO_PART_REFUNDED
-        value: 9CG69063AL531292H
+        value: '1SH756385W667132X'
 
       # The free plan has no persistent disk, so the database is rebuilt from the seed
       # on every restart. That is fine for a demo and means the audit chain starts over

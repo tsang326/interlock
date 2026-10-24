@@ -111,7 +111,7 @@ export function AgentPanel({ onProposals, onError }: Props) {
           <>
             {' '}
             <b style={{ color: 'var(--warn)' }}>
-              No ANTHROPIC_API_KEY is set, so the agent cannot run. Interlock itself does not
+              No OPENAI_API_KEY is set, so the agent cannot run. Interlock itself does not
               need one.
             </b>
           </>

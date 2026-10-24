@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS audit (
   prev_hash   TEXT NOT NULL,
   hash        TEXT NOT NULL
 );
+
+-- What the demo tamper overwrote, so the demo can be put back. Outside the chain on purpose.
+CREATE TABLE IF NOT EXISTS demo_tamper (
+  seq      INTEGER PRIMARY KEY,
+  original TEXT NOT NULL
+);
 `;
 
 const GENESIS_HASH = '0'.repeat(64);
@@ -405,12 +411,22 @@ export class Store {
     this.db.prepare(`UPDATE proposals SET ${sets.join(', ')} WHERE id = @id`).run(bind);
   }
 
-  /** Count of proposals of one kind created inside the window; drives velocity rules. */
-  countRecentByKind(kind: string, windowMinutes: number): number {
-    const since = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+  /**
+   * Count of proposals of one kind in the window before `before`; drives velocity rules.
+   *
+   * The window is anchored to the proposal being judged rather than to the clock, so the
+   * question is the one the rule actually asks — "were there five of these in the ten
+   * minutes before this one" — and it gets the same answer however long the row has been
+   * sitting in the queue. Anchoring to `Date.now()` instead made a seeded demo queue read
+   * as one giant burst, which blocked the next honest refund for ten minutes.
+   */
+  countRecentByKind(kind: string, windowMinutes: number, before: string): number {
+    const since = new Date(new Date(before).getTime() - windowMinutes * 60_000).toISOString();
     const row = this.db
-      .prepare('SELECT COUNT(*) AS n FROM proposals WHERE kind = ? AND created_at >= ?')
-      .get(kind, since) as { n: number };
+      .prepare(
+        'SELECT COUNT(*) AS n FROM proposals WHERE kind = ? AND created_at >= ? AND created_at < ?',
+      )
+      .get(kind, since, before) as { n: number };
     return row.n;
   }
 
@@ -471,11 +487,27 @@ export class Store {
       .prepare("SELECT seq, payload FROM audit WHERE type != 'policy.updated' ORDER BY seq ASC LIMIT 1 OFFSET 1")
       .get() as { seq: number; payload: string } | undefined;
     if (!row) return undefined;
+    // Keep the first original only: tampering twice must still restore what was there before
+    this.db.prepare('INSERT OR IGNORE INTO demo_tamper (seq, original) VALUES (?, ?)').run(row.seq, row.payload);
     const payload = JSON.parse(row.payload) as Record<string, unknown>;
     payload.amount = { value: 1, currency: 'USD' };
     payload.tamperedBy = 'demo';
     this.db.prepare('UPDATE audit SET payload = ? WHERE seq = ?').run(JSON.stringify(payload), row.seq);
     return { seq: row.seq, field: 'payload.amount' };
+  }
+
+  /**
+   * Undoes `demoTamper` by writing back the exact bytes it replaced. On a public demo one
+   * visitor's tamper would otherwise leave a broken chain for every visitor after them.
+   */
+  demoRestore(): number[] {
+    const rows = this.db.prepare('SELECT seq, original FROM demo_tamper ORDER BY seq').all() as { seq: number; original: string }[];
+    const write = this.db.prepare('UPDATE audit SET payload = ? WHERE seq = ?');
+    this.db.transaction(() => {
+      for (const r of rows) write.run(r.original, r.seq);
+      this.db.prepare('DELETE FROM demo_tamper').run();
+    })();
+    return rows.map((r) => r.seq);
   }
 
   countRules(): number {

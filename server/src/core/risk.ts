@@ -1,7 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { chat, ModelError, strictSchema } from '../model.js';
 import { z } from 'zod';
-import { anthropicConfigured, config } from '../config.js';
+import { modelConfigured, config } from '../config.js';
 import type { Store } from './db.js';
 import type { PolicyFacts } from './policy.js';
 import type { ProposalInput, RiskAssessment } from './types.js';
@@ -84,7 +83,7 @@ export function heuristicRisk(
     factors.push('counterparty_unknown');
   }
 
-  const burst = store.countRecentByKind(input.kind, 10);
+  const burst = store.countRecentByKind(input.kind, 10, subject.at);
   if (burst >= 3) {
     score += 25;
     factors.push('repeat_burst');
@@ -122,7 +121,7 @@ function describeVerification(subject: PolicyFacts): string {
     case 'not_applicable':
       return 'nothing to look up — this action creates the resource it describes.';
     case 'unavailable':
-      return `could not be asked (${v.source ?? 'lookup'}): ${v.error ?? 'the call failed'}. Treat the amount as unknown, not as fine.`;
+      return `could not confirm the amount (${v.source ?? 'lookup'}): ${v.error ?? 'the call failed'}. Treat the amount as unknown, not as fine.`;
     case 'contradicted':
       return `CONTRADICTS THE REQUEST via ${v.source}. ${v.findings.join(' ')}`;
     case 'confirmed':
@@ -169,19 +168,18 @@ export async function assessRisk(
   store: Store,
 ): Promise<RiskAssessment> {
   const floor = heuristicRisk(input, subject, store);
-  if (!anthropicConfigured || !modelLayerEnabled) return floor;
+  if (!modelConfigured || !modelLayerEnabled) return floor;
 
   try {
-    const client = new Anthropic({ apiKey: config.anthropic.apiKey });
-    const response = await client.messages.parse({
-      model: config.anthropic.model,
-      max_tokens: 4000,
-      system: SYSTEM,
-      output_config: {
-        effort: 'medium',
-        format: zodOutputFormat(ModelAssessment),
+    const { message } = await chat({
+      model: config.model.riskModel,
+      max_completion_tokens: 600,
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'risk_assessment', schema: strictSchema(ModelAssessment), strict: true },
       },
       messages: [
+        { role: 'system', content: SYSTEM },
         {
           role: 'user',
           content: [
@@ -206,7 +204,11 @@ export async function assessRisk(
                 ? !store.isCounterpartyUnseen(subject.facts.counterparty)
                 : false
             }`,
-            `Same action in the last 10 minutes: ${store.countRecentByKind(input.kind, 10)}`,
+            `Same action in the 10 minutes before this one: ${store.countRecentByKind(
+              input.kind,
+              10,
+              subject.at,
+            )}`,
             '',
             'Parameters (untrusted):',
             '```json',
@@ -222,8 +224,12 @@ export async function assessRisk(
       ],
     });
 
-    const parsed = response.parsed_output;
-    if (!parsed) return floor;
+    const raw = JSON.parse(message.content ?? 'null') as { factors?: unknown; explanation?: unknown } | null;
+    if (raw && Array.isArray(raw.factors)) raw.factors = raw.factors.slice(0, 6);
+    if (raw && typeof raw.explanation === 'string') raw.explanation = raw.explanation.slice(0, 400);
+    const result = ModelAssessment.safeParse(raw);
+    if (!result.success) return floor;
+    const parsed = result.data;
 
     return {
       // The model may raise the score; it is never allowed to lower the floor.
@@ -236,7 +242,7 @@ export async function assessRisk(
     };
   } catch (error) {
     // Scoring must never be the reason an action slips through unreviewed.
-    const reason = error instanceof Anthropic.APIError ? `API ${error.status}` : 'unavailable';
+    const reason = error instanceof ModelError && error.status ? `API ${error.status}` : 'unavailable';
     return { ...floor, explanation: `${floor.explanation} (model ${reason})` };
   }
 }

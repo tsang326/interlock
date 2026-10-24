@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { anthropicConfigured, config, paypalConfigured } from './config.js';
+import { modelConfigured, config, paypalConfigured } from './config.js';
 import { Store } from './core/db.js';
 import { seedDefaultRules } from './core/policy.js';
 import { Interlock } from './core/interlock.js';
@@ -62,7 +62,8 @@ async function start(): Promise<void> {
   app.listen(config.port, () => {
     console.log(`Interlock listening on :${config.port}`);
     console.log(`  PayPal     ${paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'LIVE') : 'simulated'}`);
-    console.log(`  Risk model ${anthropicConfigured ? config.anthropic.model : 'heuristics only'}`);
+    console.log(`  Risk model ${modelConfigured ? config.model.riskModel : 'heuristics only'}`);
+    console.log(`  Agent      ${modelConfigured ? config.model.agentModel : 'no key; runs are refused'}`);
     console.log(`  Database   ${config.dbFile}`);
     console.log(`  Console    ${consoleBuilt ? 'served from web/dist' : 'not built; run pnpm build'}`);
   });

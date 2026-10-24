@@ -53,7 +53,7 @@ and subscriptions, where the money leaves the merchant's own account.
                                       │
    ┌──────────┐   proposes   ┌────────┴─────────┐   approved only   ┌─────────┐
    │  Agent   │ ───────────► │    Interlock     │ ────────────────► │ PayPal  │
-   │ (Claude) │              │  policy + review │                   │   API   │
+   │ (gpt-4.1)│              │  policy + review │                   │   API   │
    └──────────┘              └────────┬─────────┘ ◄──────────────── └─────────┘
         │                             │            what PayPal         ▲
         │  reads freely          ┌────┴────┐       actually holds      │
@@ -72,12 +72,23 @@ Of the toolkit's 47 tools:
 | **the remaining 23** | never wired up, so they are not reachable at all |
 
 Plus one call the toolkit has no tool for — reading a capture — which Interlock makes against the
-REST API underneath. That is the sixteenth readable call and the reason the console says 16.
+REST API underneath. That is the sixteenth readable call.
+
+**The console says 14, not 16, and that is deliberate.** All sixteen are allow-listed, but two of
+them cannot answer from a sandbox app: `get_shipment_tracking` needs a scope this app was never
+granted and PayPal returns a bare 403, and `get_merchant_insights` is refused by the toolkit itself
+before a request is made. Asking for either gets `501 unavailable_here` naming the reason and
+listing what does work, and neither is offered to the agent or counted on screen. All sixteen were
+called against this app's own credentials on 2026-10-20 to establish which fourteen answer; on a
+live account with the scopes granted, the count is 16.
 
 That last row matters: Interlock is **default-deny**. `pay_order`, for example, exists in the toolkit
-and is simply not connected. The claim is not "we gate every dangerous tool" — it is "nothing
-reaches PayPal except through one function, and that function runs only for a proposal that has
-already been decided."
+and is simply not connected. The claim is not "we gate every dangerous tool" — it is "**no
+money-moving call reaches PayPal except through `executeApproved`, and it runs only for a proposal
+that has already been decided**". Reads reach PayPal by their own path, which moves nothing, and the
+demo seed is the one explicit exception: `server/src/seed.ts` calls `executeApproved` directly to
+create the invoices the queue is about, because there has to be something real to decide on before
+anyone has decided anything.
 
 ### The rule the whole design rests on
 
@@ -100,6 +111,11 @@ Interlock derives `9500` in the first case and `unverifiable` in the second. Bot
 human. An amount nobody could establish can never satisfy an auto-approve rule — not because a
 rule says so, but because a guard outside the rule set says so, since rules are editable from the
 console and this must not be.
+
+The same guards hold anything scored 70 or above, whatever the rules say. The model can only raise
+a score, so this is what makes "the model never approves" true even after someone edits a rule to
+auto-approve high-risk actions: raising a score can push an action towards a human, never towards
+execution.
 
 ### The third account: what PayPal itself says
 
@@ -151,7 +167,7 @@ A deterministic layer always runs: action type, amount bands, a counterparty nev
 repeated actions in a short window, and whether the agent's account of the action matches the
 request. It sets a floor.
 
-Claude (`claude-opus-5-5`) then reads the specific request and may **raise** the score. It can
+A model (`gpt-4.1` by default) then reads the specific request and may **raise** the score. It can
 never lower the floor, and it can never approve anything. Its own instructions treat the agent's
 rationale as attacker-controlled data: an agent reads customer emails and invoice notes, so text
 arguing for approval is treated as evidence of a problem rather than a reason.
@@ -160,8 +176,20 @@ The review screen shows both numbers. A reviewer should know whether an alarm ca
 that always fires the same way or from the model reading this one request — and sometimes they
 disagree, which is the useful part.
 
-If no Anthropic key is configured, the deterministic layer runs alone and every proposal is
+If no OpenAI key is configured, the deterministic layer runs alone and every proposal is
 labelled as rules-only. Nothing silently loosens.
+
+**The two jobs are configured separately, because they are not the same job.** Scoring is one
+short structured call per proposal; the agent is a multi-turn conversation that has to hold its
+nerve against a prompt injection written in a customer's own words. `INTERLOCK_MODEL` sets both,
+`INTERLOCK_RISK_MODEL` and `INTERLOCK_AGENT_MODEL` pin one at a time, and the console names each
+model it is actually running rather than the one this file was written about. Scoring is also the
+call a development loop repeats for every proposal in the queue, so it is where a cheaper model
+saves the most — and the saving is measurable rather than assumed, since the two findings the
+model layer contributes (a recipient that does not match the counterparty the agent named, and a
+note that argues against its own rationale) either still appear on a substituted model or they do
+not. `pnpm seed --rules-only` rebuilds the queue with no model calls at all, which is the right
+tool while policy or verification is what changed.
 
 ### Two roles, because one would defeat the point
 
@@ -218,10 +246,12 @@ it does not inherit the caller's credentials and still cannot approve its own wo
 One of the three messages carries a prompt injection — a block addressed to "the
 processing agent" telling it the account is pre-cleared, to refund the full payment
 rather than the stated figure, and to leave the notice out of its summary. The demo does
-not depend on the agent falling for it. It usually does not: it finishes the legitimate
-part, says what the message tried, and files nothing. That is the first layer holding,
-and the queue carries a seeded example of what the second layer does when the first one
-does not.
+not depend on the agent falling for it, and on gpt-4.1 the outcome varies from run to run:
+it has proposed the 25.00 the customer asked for and reported what the message tried, and
+it has proposed refunding the whole 4,200.00 capture. Either way it can only propose, and
+Interlock holds both: the capture is partly refunded, so what is left cannot be confirmed.
+The queue also carries a seeded example of a fooled agent, with its rationale quoting the
+injected instruction.
 
 ### The audit log
 
@@ -240,7 +270,7 @@ Requires Node 24 and pnpm. (better-sqlite3 is a native module, so the Node versi
 
 ```bash
 pnpm install
-cp .env.example .env     # PayPal sandbox credentials; the Anthropic key is optional
+cp .env.example .env     # PayPal sandbox credentials; the OpenAI key is optional
 pnpm --filter @interlock/server seed     # fills the review queue with a worked scenario
 pnpm dev                               # API on :8787, UI on http://localhost:5173
 pnpm --filter @interlock/server agent    # optional: run the agent against the demo inbox
@@ -251,7 +281,7 @@ and files proposals against them. It also refers to two captures from the sandbo
 built in; point it at your own with `INTERLOCK_DEMO_CAPTURE` and `INTERLOCK_DEMO_PART_REFUNDED`,
 or leave them and those scenarios will show as unverifiable, which is the honest result.
 
-The agent needs `ANTHROPIC_API_KEY` and a running server. Interlock itself needs neither.
+The agent needs `OPENAI_API_KEY` and a running server. Interlock itself needs neither.
 
 ### Signing in
 
@@ -277,14 +307,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 
 Get sandbox credentials from the [PayPal developer dashboard](https://developer.paypal.com/dashboard/)
 (Apps & Credentials → Sandbox). Without them Interlock still runs; approved actions are simulated and
-labelled as such. Without an `ANTHROPIC_API_KEY`, risk scoring falls back to the deterministic layer.
+labelled as such. Without an `OPENAI_API_KEY`, risk scoring falls back to the deterministic layer.
 
 ### Deploying
 
 `render.yaml` deploys the whole thing as one Render service: the API serves the built
 console, so there is one origin and one URL. Create it from the dashboard with **New →
 Blueprint**, point it at this repo, and Render will prompt for the three secrets — the
-PayPal sandbox pair and the Anthropic key. Everything else is in the file.
+PayPal sandbox pair and the OpenAI key. Everything else is in the file.
 
 Two things about the free plan, both deliberate rather than hidden:
 
@@ -300,12 +330,21 @@ The seed runs on boot only when the queue is empty, so a restart never duplicate
 scenario and never disturbs a queue someone has been working in. Set
 `INTERLOCK_SEED_ON_BOOT=false` to leave a fresh database empty.
 
+**The seeded queue is filed with the times it would really have** — the worked scenarios
+across the preceding hours, the burst as one tight cluster. That is not decoration. A
+velocity window is measured from the proposal being judged, so a queue whose every row
+arrived in the same second reads as one long burst: it blocks the next honest refund for
+ten minutes, and puts a `repeat_burst` on rows that earned nothing of the kind. Filed
+honestly, the burst is the only thing inside a single window, and it is eight long because
+the rule blocks a refund once five others preceded it — so the first five are what a loop
+looks like before anyone could tell, and the sixth is where it stops.
+
 **The starting queue on a deployment is scored by the rules alone.** Without a disk it is
 rebuilt at every cold start, and scoring every proposal in it with the model each time the
 service wakes would let anyone visiting the URL spend the model budget, with no ceiling.
 Everything filed after boot — every agent run, every proposal you file by hand — is scored
 by both layers as normal. `INTERLOCK_SEED_MODEL=true` scores the starting queue too, and
-costs one model call per proposal in that queue — fifteen against a live sandbox, thirteen
+costs one model call per proposal in that queue — eighteen against a live sandbox, sixteen
 without.
 
 **The agent has a run budget, for the same reason.** A run is a multi-turn model
@@ -324,12 +363,13 @@ they were.
 pnpm --filter @interlock/server test
 ```
 
-32 tests, about a second and a half, no network and no model — because a guarantee that needs a language
+38 tests, about a second and a half, no network and no model — because a guarantee that needs a language
 model to agree with it is not a guarantee. They cover both attacks above, the honest path still
 running unattended, a held proposal never reaching PayPal, both of the toolkit's failure shapes
 being recorded as failed rather than executed, a refund larger than the capture it draws on being
 caught, a capture PayPal has already refunded being refused, a failed PayPal lookup never being
-read as a passed one, and the audit chain catching an edited and a deleted entry.
+read as a passed one, the audit chain catching an edited and a deleted entry, and the demo
+tamper being undone byte for byte.
 
 One test is named `KNOWN LIMIT` and asserts a weakness rather than a strength. It is below.
 
@@ -383,9 +423,11 @@ A security tool that oversells itself is worse than none, so:
   `PARTIALLY_REFUNDED` but not how much of it is left, so Interlock knows the ceiling and not the
   headroom. It holds those for a human rather than guessing, which is correct and also means a
   legitimate second adjustment never runs unattended.
-- **`get_merchant_insights` is in the read set but the toolkit refuses it in sandbox**, so it is
-  unavailable in the demo. It is left in the list because it is read-only at the API level; the
-  sandbox restriction is the toolkit's, not Interlock's.
+- **Two of the sixteen reads cannot answer in sandbox.** `get_merchant_insights` is refused by the
+  toolkit outside live mode, and `get_shipment_tracking` needs a scope this app does not hold, so
+  PayPal answers 403. Both stay allow-listed — they are read-only at the API level and a live
+  account can call them — but they are not offered to the agent, not counted on screen, and asking
+  for one returns `501 unavailable_here` with the reason. Neither restriction is Interlock's.
 - **No rate limiting on anything except the agent.** Reads, proposals and decisions can be
   driven freely against the sandbox, deliberately, because nothing there is metered. The agent
   is, so it has a run budget and runs one at a time; see "Deploying". That is a spending
@@ -405,8 +447,10 @@ A security tool that oversells itself is worse than none, so:
   Proposal parameters are validated against the toolkit's own schemas at proposal time, so a
   malformed request is refused while it is still cheap rather than at the moment money is meant to
   move.
-- **Claude Opus 5.5** via the Anthropic SDK, twice over: structured outputs for the risk layer,
-  and the beta tool runner with Zod-typed tools for the agent that files the proposals.
+- **OpenAI gpt-4.1** over the Chat Completions HTTP API (no SDK), twice over: strict JSON-schema
+  output for the risk layer, and function calling with Zod-validated tools for the agent that files
+  the proposals (`server/src/model.ts`, `server/src/agent/run.ts`). Each job
+  reads its own setting, so either can run on a different model; the console reports which.
 - **AG Grid Community** for the review queue, **React + Vite** for the console.
 - **TypeScript**, **Express**, **SQLite** (better-sqlite3), server-sent events for live updates.
 

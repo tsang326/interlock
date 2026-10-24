@@ -35,6 +35,21 @@ export function AuditPanel({
     }
   };
 
+  const restore = async () => {
+    try {
+      const result = await api.demoRestore();
+      setChain(result.verification);
+      await load();
+      onError(
+        result.restored.length
+          ? `Entry ${result.restored.join(', ')} restored to what it held before the tamper.`
+          : 'Nothing to restore: the demo tamper has not been used.',
+      );
+    } catch (error) {
+      onError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const verify = async () => {
     setVerifying(true);
     try {
@@ -57,6 +72,9 @@ export function AuditPanel({
             <button className="danger" onClick={() => void tamper()}>
               Tamper with the log
             </button>
+          )}
+          {tamperAvailable && chain && !chain.ok && (
+            <button onClick={() => void restore()}>Undo the tamper</button>
           )}
           <button className="primary" onClick={verify} disabled={verifying}>
             {verifying ? 'Verifying…' : 'Verify chain'}

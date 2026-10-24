@@ -53,6 +53,39 @@ export const REST_READS = ['show_capture_details'] as const;
  */
 export const READABLE: readonly string[] = [...READ_ONLY_TOOLS, ...REST_READS];
 
+/**
+ * Reads that are allow-listed but cannot answer from this deployment, with the reason.
+ *
+ * Measured against this app's own sandbox credentials on 2026-10-20 by calling all
+ * sixteen: fourteen answer, and these two cannot. `get_shipment_tracking` needs a scope
+ * this app was never granted, so PayPal returns a 403 with no usable body at all;
+ * `get_merchant_insights` is refused by the toolkit itself, before any request is made.
+ *
+ * The allow-list keeps both. A live deployment with the scope granted can call them, and
+ * a caller that asks for one here should be told why it cannot answer rather than handed
+ * a bare gateway error. What changes is what Interlock advertises: the count on screen and
+ * the catalogue the agent reads come from `callableReads()`, because a read a reviewer can
+ * click and watch fail is worth less than one fewer read.
+ */
+export const UNAVAILABLE_IN_SANDBOX: Readonly<Record<string, string>> = {
+  get_shipment_tracking:
+    'this app holds no shipping-tracking scope, so PayPal refuses the call (HTTP 403)',
+  get_merchant_insights:
+    'the PayPal toolkit refuses it outside live mode: not supported in sandbox',
+};
+
+/** Everything a caller can actually get an answer from, here, now. */
+export function callableReads(): readonly string[] {
+  if (!config.paypal.sandbox) return READABLE;
+  return READABLE.filter((name) => !(name in UNAVAILABLE_IN_SANDBOX));
+}
+
+/** Why a read cannot answer from this deployment, or undefined if it can. */
+export function unavailableReason(name: string): string | undefined {
+  if (!config.paypal.sandbox) return undefined;
+  return UNAVAILABLE_IN_SANDBOX[name];
+}
+
 const SANDBOX_API = 'https://api-m.sandbox.paypal.com';
 const LIVE_API = 'https://api-m.paypal.com';
 
