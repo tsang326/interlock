@@ -65,9 +65,9 @@ services:
       # if you are running a copy; left unset, those scenarios show as unverifiable,
       # which is the honest result rather than a broken one.
       - key: INTERLOCK_DEMO_CAPTURE
-        value: 11F28618GB587605W
+        value: '97H84399YC068270R'
       - key: INTERLOCK_DEMO_PART_REFUNDED
-        value: 9CG69063AL531292H
+        value: '1SH756385W667132X'
 
       # The free plan has no persistent disk, so the database is rebuilt from the seed
       # on every restart. That is fine for a demo and means the audit chain starts over
