@@ -18,6 +18,7 @@ import { seedDefaultRules } from './core/policy.js';
 import { createApi } from './http/api.js';
 import { Interlock } from './core/interlock.js';
 import { PayPalExecutor, assertSucceeded, type Executor } from './paypal/executor.js';
+import { resetModelSpend } from './model.js';
 import type { ActionKind, ProposalInput } from './core/types.js';
 
 
@@ -674,10 +675,13 @@ describe('the demo cannot be made to spend without a ceiling', () => {
    * stranger can start a run — they can, that is the demo — but whether they can
    * start an unbounded number of them.
    */
-  async function serve(agentRunBudget: number) {
+  async function serve(
+    agentRunBudget: number,
+    extra: { agentSpendBudgetUsd?: number; agentRunWindowHours?: number } = {},
+  ) {
     const store = freshStore(`budget-${Math.random().toString(36).slice(2, 8)}`);
     const interlock = new Interlock(store, new StubExecutor());
-    const app = createApi(store, interlock, new PayPalExecutor(), { agentRunBudget });
+    const app = createApi(store, interlock, new PayPalExecutor(), { agentRunBudget, ...extra });
     const server = app.listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const address = server.address();
@@ -734,6 +738,54 @@ describe('the demo cannot be made to spend without a ceiling', () => {
       assert.deepEqual(health.agentRuns, { started: 0, budget: 3 });
     } finally {
       s.close();
+    }
+  });
+
+  /**
+   * The run ceiling has to refill. Keeping the process awake for a judging period —
+   * which is what a keep-warm ping does — means it never restarts, and a count that
+   * only ever rose would make the first few visitors the only ones who ever see the
+   * agent run. So the refusal names when the allowance comes back.
+   */
+  test('a spent run allowance says when it refills, and health says the same', async () => {
+    const s = await serve(0, { agentRunWindowHours: 6 });
+    try {
+      const body = (await (await run(s.base, { authorization: 'Bearer demo-reviewer-token' })).json()) as {
+        retryAfterMinutes: number;
+      };
+      assert.ok(body.retryAfterMinutes > 0 && body.retryAfterMinutes <= 6 * 60);
+      const health = (await (await fetch(`${s.base}/api/health`)).json()) as {
+        agentBudget: { windowHours: number; windowResetsInMinutes: number };
+      };
+      assert.equal(health.agentBudget.windowHours, 6);
+      assert.ok(health.agentBudget.windowResetsInMinutes > 0);
+    } finally {
+      s.close();
+    }
+  });
+
+  /**
+   * Runs are a proxy for spending, and a poor one: a run whose tool results came back
+   * large costs several times what a short one does. The ceiling that guards the card
+   * is therefore in dollars, counted from what the API reported it charged.
+   */
+  test('the dollar ceiling refuses a run even when run allowance is left', async () => {
+    resetModelSpend();
+    const s = await serve(50, { agentSpendBudgetUsd: 0 });
+    try {
+      const response = await run(s.base, { authorization: 'Bearer demo-reviewer-token' });
+      assert.equal(response.status, 429);
+      const body = (await response.json()) as { error: string; budgetUsd: number };
+      assert.equal(body.error, 'agent_spend_spent');
+      assert.equal(body.budgetUsd, 0);
+      const health = (await (await fetch(`${s.base}/api/health`)).json()) as {
+        agentBudget: { spentUsd: number; spendBudgetUsd: number };
+      };
+      assert.equal(health.agentBudget.spendBudgetUsd, 0);
+      assert.equal(health.agentBudget.spentUsd, 0);
+    } finally {
+      s.close();
+      resetModelSpend();
     }
   });
 });

@@ -48,11 +48,17 @@ services:
       #   value: gpt-4.1-mini
 
       # An agent run is a multi-turn model conversation, and this URL and its tokens are
-      # both published. This is the ceiling on how many runs the service will start
-      # before it refuses, per process — so a cold start resets it, and a visitor cannot
-      # spend without a bound. Reads, decisions and the queue are unaffected.
+      # both published. Two ceilings guard it. The run count refills every window, so a
+      # service kept awake by a ping does not hand the whole period to whoever arrived
+      # first; the dollar ceiling is per process and does not refill, because money is
+      # what is actually being spent and a long run costs several times a short one.
+      # Reads, decisions and the queue are unaffected.
       - key: INTERLOCK_AGENT_RUN_BUDGET
         value: '25'
+      - key: INTERLOCK_AGENT_RUN_WINDOW_HOURS
+        value: '24'
+      - key: INTERLOCK_AGENT_SPEND_USD
+        value: '4'
 
       # Published demo credentials, so a judge can sign in. Change them and the README's
       # sign-in table stops being true, so change both together.

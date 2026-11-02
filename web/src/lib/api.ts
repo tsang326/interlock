@@ -109,6 +109,14 @@ export type Health = {
   demoTamperAvailable: boolean;
   usingDemoTokens: boolean;
   agentRuns: { started: number; budget: number };
+  agentBudget?: {
+    runsEver: number;
+    windowHours: number;
+    windowResetsInMinutes: number;
+    spentUsd: number;
+    spendBudgetUsd: number;
+    modelCalls: number;
+  };
 };
 
 export type ChainVerification = {

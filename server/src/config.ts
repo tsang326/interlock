@@ -42,6 +42,14 @@ export const config = {
     // conversation. A published URL with published tokens is an open door to it, so the
     // number of runs this process will start is a hard ceiling rather than a hope.
     runBudget: Number(process.env.INTERLOCK_AGENT_RUN_BUDGET ?? 25),
+    // The run ceiling refills, because a process that is kept awake never restarts and
+    // a ceiling that never refills turns into a ceiling for the whole month: the
+    // twenty-sixth person to press the button would be told the demo is spent. So the
+    // runs are counted in a rolling window, and the thing that cannot refill is money.
+    runBudgetWindowHours: Number(process.env.INTERLOCK_AGENT_RUN_WINDOW_HOURS ?? 24),
+    // What the model calls behind those runs are allowed to cost, in US dollars, for
+    // the life of this process. Runs are a proxy for spending; this is the spending.
+    spendBudgetUsd: Number(process.env.INTERLOCK_AGENT_SPEND_USD ?? 4),
   },
   port: Number(process.env.PORT ?? 8787),
   dbFile: process.env.INTERLOCK_DB ?? './interlock.sqlite',
