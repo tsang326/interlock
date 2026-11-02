@@ -347,15 +347,26 @@ by both layers as normal. `INTERLOCK_SEED_MODEL=true` scores the starting queue 
 costs one model call per proposal in that queue — eighteen against a live sandbox, sixteen
 without.
 
-**The agent has a run budget, for the same reason.** A run is a multi-turn model
+**The agent has two budgets, for the same reason.** A run is a multi-turn model
 conversation, and both this URL and its tokens are published: without a ceiling, a visitor
-can spend the model budget, and a loop can spend it quickly. So the service starts at most
-`INTERLOCK_AGENT_RUN_BUDGET` runs (25 by default) and then refuses with a 429 that says what
-happened; it also runs one at a time, because the console disables the button during a run
-and `curl` does not. The count is per process, so a restart resets it. Nothing else is
-limited — reads, proposals and decisions are not metered and are left open. A refusal here
-is about cost, and the queue, the audit log and every run already made stay exactly as
-they were.
+can spend the model budget, and a loop can spend it quickly. It also runs one at a time,
+because the console disables the button during a run and `curl` does not.
+
+- `INTERLOCK_AGENT_RUN_BUDGET` (25) is how many runs start per
+  `INTERLOCK_AGENT_RUN_WINDOW_HOURS` (24). It refills, and the 429 says in how many
+  minutes. A ceiling that only ever went up would be fine for a process that restarts
+  often and wrong for one that is kept awake: whoever arrived first would hold the
+  whole period, and the next visitor would be told the demo is spent.
+- `INTERLOCK_AGENT_SPEND_USD` (4.00) is what the model calls behind those runs may cost
+  for the life of the process, counted from the `usage` the API reports rather than from
+  an estimate. Runs are a poor proxy for money: a run whose tool results came back large
+  costs several times what a short one does, and no number of runs can express that.
+  This one does not refill.
+
+`/api/health` publishes both, with what has been spent so far, so the state is visible
+rather than guessed. Nothing else is limited — reads, proposals and decisions are not
+metered and are left open. A refusal here is about cost, and the queue, the audit log and
+every run already made stay exactly as they were.
 
 ### Verify the claims without any credentials
 

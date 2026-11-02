@@ -13,6 +13,7 @@ import {
   type PayPalExecutor,
 } from '../paypal/executor.js';
 import { INBOX } from '../agent/inbox.js';
+import { modelSpend } from '../model.js';
 import { runAgent } from '../agent/run.js';
 import { callerOf, requireRole } from './auth.js';
 
@@ -82,22 +83,40 @@ export function createApi(
   store: Store,
   interlock: Interlock,
   paypal: PayPalExecutor,
-  options: { agentRunBudget?: number } = {},
+  options: { agentRunBudget?: number; agentSpendBudgetUsd?: number; agentRunWindowHours?: number } = {},
 ) {
   // Spending, not traffic, is what needs the ceiling here: an agent run costs model
-  // calls, and this deployment publishes both its URL and its tokens. The budget is
-  // counted per process, and one run at a time stops a loop from multiplying it. The
-  // UI disables the button while a run streams; a caller using curl does not, so the
-  // check lives here.
+  // calls, and this deployment publishes both its URL and its tokens. One run at a
+  // time stops a loop from multiplying it. The UI disables the button while a run
+  // streams; a caller using curl does not, so the check lives here.
+  //
+  // Two ceilings, because they answer different questions. The run count is a rolling
+  // window: a process that is pinged awake never restarts, so a count that only ever
+  // went up would hand the whole demo period to whoever arrived first. Money does not
+  // refill, so the dollar ceiling is per process and absolute — a run whose tool
+  // results came back large costs several times what a short one does, and no number
+  // of runs can express that.
   const agentRunBudget = options.agentRunBudget ?? config.agent.runBudget;
+  const agentSpendBudgetUsd = options.agentSpendBudgetUsd ?? config.agent.spendBudgetUsd;
+  const windowMs = (options.agentRunWindowHours ?? config.agent.runBudgetWindowHours) * 3_600_000;
+  let windowStartedAt = Date.now();
   let agentRunsStarted = 0;
+  let agentRunsEver = 0;
   let agentRunInFlight = false;
+
+  /** Opens a fresh window once the old one has run out. */
+  const rollWindow = () => {
+    if (Date.now() - windowStartedAt < windowMs) return;
+    windowStartedAt = Date.now();
+    agentRunsStarted = 0;
+  };
 
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req, res) => {
+    rollWindow();
     res.json({
       ok: true,
       paypal: paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'live') : 'simulated',
@@ -113,6 +132,14 @@ export function createApi(
       demoTamperAvailable: config.paypal.sandbox,
       usingDemoTokens,
       agentRuns: { started: agentRunsStarted, budget: agentRunBudget },
+      agentBudget: {
+        runsEver: agentRunsEver,
+        windowHours: windowMs / 3_600_000,
+        windowResetsInMinutes: Math.max(0, Math.ceil((windowStartedAt + windowMs - Date.now()) / 60_000)),
+        spentUsd: modelSpend().usd,
+        spendBudgetUsd: agentSpendBudgetUsd,
+        modelCalls: modelSpend().calls,
+      },
     });
   });
 
@@ -153,15 +180,32 @@ export function createApi(
       });
       return;
     }
+    rollWindow();
     if (agentRunsStarted >= agentRunBudget) {
+      const minutes = Math.max(1, Math.ceil((windowStartedAt + windowMs - Date.now()) / 60_000));
       res.status(429).json({
         error: 'agent_budget_spent',
         detail:
-          `This deployment starts at most ${agentRunBudget} agent runs, and all of them have been used. ` +
-          'The runs that were made are still in the queue and the audit log. ' +
-          'Raise INTERLOCK_AGENT_RUN_BUDGET to allow more.',
+          `This deployment starts at most ${agentRunBudget} agent runs every ` +
+          `${windowMs / 3_600_000} hours, and all of them have been used. The allowance refills in ` +
+          `${minutes} minute${minutes === 1 ? '' : 's'}. The runs that were made are still in the queue ` +
+          'and the audit log. Raise INTERLOCK_AGENT_RUN_BUDGET to allow more.',
         started: agentRunsStarted,
         budget: agentRunBudget,
+        retryAfterMinutes: minutes,
+      });
+      return;
+    }
+    const spent = modelSpend().usd;
+    if (spent >= agentSpendBudgetUsd) {
+      res.status(429).json({
+        error: 'agent_spend_spent',
+        detail:
+          `The model budget for this deployment is $${agentSpendBudgetUsd.toFixed(2)} and $${spent.toFixed(2)} ` +
+          'of it has been used, so no further runs start. Everything already decided is still in the queue ' +
+          'and the audit log. Raise INTERLOCK_AGENT_SPEND_USD to allow more.',
+        spentUsd: spent,
+        budgetUsd: agentSpendBudgetUsd,
       });
       return;
     }
@@ -174,6 +218,7 @@ export function createApi(
     }
 
     agentRunsStarted += 1;
+    agentRunsEver += 1;
     agentRunInFlight = true;
 
     res.setHeader('content-type', 'application/x-ndjson');
