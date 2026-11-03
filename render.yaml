@@ -53,10 +53,15 @@ services:
       # first; the dollar ceiling is per process and does not refill, because money is
       # what is actually being spent and a long run costs several times a short one.
       # Reads, decisions and the queue are unaffected.
+      #
+      # The window is six hours rather than a day because judging runs 1-15 December,
+      # weeks after the last change here, and the tokens for this route are printed in
+      # the README. What a stranger can spend is capped either way; what matters is how
+      # long the Agent tab stays at 429 behind them, and six hours bounds it.
       - key: INTERLOCK_AGENT_RUN_BUDGET
-        value: '25'
+        value: '8'
       - key: INTERLOCK_AGENT_RUN_WINDOW_HOURS
-        value: '24'
+        value: '6'
       - key: INTERLOCK_AGENT_SPEND_USD
         value: '4'
 

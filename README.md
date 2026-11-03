@@ -352,9 +352,12 @@ conversation, and both this URL and its tokens are published: without a ceiling,
 can spend the model budget, and a loop can spend it quickly. It also runs one at a time,
 because the console disables the button during a run and `curl` does not.
 
-- `INTERLOCK_AGENT_RUN_BUDGET` (25) is how many runs start per
-  `INTERLOCK_AGENT_RUN_WINDOW_HOURS` (24). It refills, and the 429 says in how many
-  minutes. A ceiling that only ever went up would be fine for a process that restarts
+- `INTERLOCK_AGENT_RUN_BUDGET` (8) is how many runs start per
+  `INTERLOCK_AGENT_RUN_WINDOW_HOURS` (6). It refills, and the 429 says in how many
+  minutes. The window is short on purpose: the tokens above are printed in this file,
+  so anyone with the URL can spend the allowance, and the cost of that is not the money
+  -- the spend ceiling below holds that -- but how long the Agent tab answers 429 behind
+  them. Six hours bounds the wait; a day would not. A ceiling that only ever went up would be fine for a process that restarts
   often and wrong for one that is kept awake: whoever arrived first would hold the
   whole period, and the next visitor would be told the demo is spent.
 - `INTERLOCK_AGENT_SPEND_USD` (4.00) is what the model calls behind those runs may cost
