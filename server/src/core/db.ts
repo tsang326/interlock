@@ -420,11 +420,17 @@ export class Store {
    * sitting in the queue. Anchoring to `Date.now()` instead made a seeded demo queue read
    * as one giant burst, which blocked the next honest refund for ten minutes.
    */
+  /**
+   * Counts earlier proposals of this kind inside the window. The bound is inclusive:
+   * every caller scores a proposal before it is inserted, so there is nothing of its
+   * own to exclude, and a strict bound instead dropped the proposals that shared its
+   * millisecond -- which is exactly what a scripted burst looks like.
+   */
   countRecentByKind(kind: string, windowMinutes: number, before: string): number {
     const since = new Date(new Date(before).getTime() - windowMinutes * 60_000).toISOString();
     const row = this.db
       .prepare(
-        'SELECT COUNT(*) AS n FROM proposals WHERE kind = ? AND created_at >= ? AND created_at < ?',
+        'SELECT COUNT(*) AS n FROM proposals WHERE kind = ? AND created_at >= ? AND created_at <= ?',
       )
       .get(kind, since, before) as { n: number };
     return row.n;
