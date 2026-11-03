@@ -41,12 +41,20 @@ export const config = {
     // The agent is the only metered thing in here: one run is a multi-turn model
     // conversation. A published URL with published tokens is an open door to it, so the
     // number of runs this process will start is a hard ceiling rather than a hope.
-    runBudget: Number(process.env.INTERLOCK_AGENT_RUN_BUDGET ?? 25),
+    runBudget: Number(process.env.INTERLOCK_AGENT_RUN_BUDGET ?? 8),
     // The run ceiling refills, because a process that is kept awake never restarts and
     // a ceiling that never refills turns into a ceiling for the whole month: the
     // twenty-sixth person to press the button would be told the demo is spent. So the
     // runs are counted in a rolling window, and the thing that cannot refill is money.
-    runBudgetWindowHours: Number(process.env.INTERLOCK_AGENT_RUN_WINDOW_HOURS ?? 24),
+    //
+    // Six hours, not twenty-four. The tokens that reach this route are published in the
+    // README, so anyone holding the URL can spend the whole allowance, and the number
+    // that matters is not how much they can spend but how long the deployment stays
+    // empty afterwards. A day-long window means a visitor who drains it at 02:00 leaves
+    // the Agent tab answering 429 until 02:00 tomorrow; a six-hour one bounds that wait
+    // to under six hours and costs nothing extra per day worth caring about. Money is
+    // still held by the spend ceiling below, which does not refill at all.
+    runBudgetWindowHours: Number(process.env.INTERLOCK_AGENT_RUN_WINDOW_HOURS ?? 6),
     // What the model calls behind those runs are allowed to cost, in US dollars, for
     // the life of this process. Runs are a proxy for spending; this is the spending.
     spendBudgetUsd: Number(process.env.INTERLOCK_AGENT_SPEND_USD ?? 4),
