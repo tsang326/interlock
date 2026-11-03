@@ -970,6 +970,15 @@ button.linkish:hover {
 .chain time {
   color: var(--muted);
 }
+/* A grid column is a fixed width, but the text in it is not: agent:agent-billing-01 ran
+   straight into the timestamp beside it with no gap. Every column in the chain clips to
+   its own track. */
+.chain li > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chain code {
   color: #7d8da3;
   font-size: 11px;
