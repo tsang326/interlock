@@ -146,7 +146,7 @@ export function AuditPanel({
  * {"value":74.5,"cur` -- which reads as a broken field rather than a shortened one. Show
  * the entry's own fields as key=value instead, and keep the full JSON in the title.
  */
-function summarise(payload: unknown): string {
+export function summarise(payload: unknown): string {
   if (payload === null || payload === undefined) return '';
   if (typeof payload !== 'object') return String(payload);
   const parts: string[] = [];

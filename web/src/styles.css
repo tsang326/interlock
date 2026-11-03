@@ -921,12 +921,28 @@ button.linkish:hover {
 }
 .chain li {
   display: grid;
-  grid-template-columns: 44px 170px 160px 150px 1fr;
+  /* seq, event, actor, time, payload, hash link. The payload takes the slack because it
+     is the only column whose length varies with the entry. */
+  grid-template-columns: 44px 150px 148px 150px minmax(0, 1fr) 150px;
   align-items: center;
   gap: 10px;
   font-size: 12px;
   padding: 3px 0;
   border-bottom: 1px solid #141a21;
+}
+.chain .chain-payload {
+  color: #9fb0c5;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chain .chain-link {
+  white-space: nowrap;
+  text-align: right;
+}
+.chain .chain-prev {
+  color: #5c6b80;
 }
 .chain .chain-type {
   color: #cfe0ff;

@@ -13,6 +13,7 @@ import { AgGridReact } from 'ag-grid-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, type AuditEntry, type Proposal } from '../lib/api';
+import { summarise } from './AuditPanel';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -129,8 +130,50 @@ function AmountCell({ data }: { data?: Row }) {
  * carries the hash of the one before, so the point of showing them in order is that a
  * reviewer can see the links as well as the events.
  */
+/** What each entry adds, rather than everything it carries.
+ *
+ *  The generic payload summary ran to eleven fields on proposal.created, most of them
+ *  already in the row above it and in the panel on the right: kind, amount, counterparty,
+ *  risk. Printing those again pushed the one field worth expanding a row for -- the
+ *  resource PayPal actually created -- past the end of the line. Each event type says the
+ *  thing it is the only source of; the full payload stays in the title for anyone who
+ *  wants it.
+ */
+function chainSummary(entry: AuditEntry): string {
+  const p = (entry.payload ?? {}) as Record<string, unknown>;
+  const text = (value: unknown) => (value === null || value === undefined ? '' : String(value));
+  switch (entry.type) {
+    case 'proposal.created': {
+      const rules = Array.isArray(p.matchedRules) ? (p.matchedRules as string[]) : [];
+      return [`risk ${text(p.riskScore)}`, text(p.decision), rules.join(', ')]
+        .filter(Boolean)
+        .join('  ·  ');
+    }
+    case 'proposal.auto_approved':
+    case 'proposal.blocked':
+      return text(p.reason);
+    case 'proposal.approved':
+    case 'proposal.rejected':
+      return p.note ? `"${text(p.note)}"` : 'no note';
+    case 'proposal.executed':
+      return [text(p.resourceRef), p.live === false ? 'simulated' : 'live at PayPal']
+        .filter(Boolean)
+        .join('  ·  ');
+    case 'proposal.failed':
+      return text(p.error);
+    default:
+      return summarise(entry.payload);
+  }
+}
+
 function AuditChainRow({ data, entries }: { data: DetailRow; entries?: AuditEntry[] }) {
-  const mine = entries?.filter((entry) => entry.proposalId === data.detailFor);
+  // The API hands back newest first, which is right for a log you are scanning. A chain
+  // is read the other way: oldest first, so each line's prev hash is the line above it and
+  // the story runs created -> approved -> executed down the page.
+  const mine = entries
+    ?.filter((entry) => entry.proposalId === data.detailFor)
+    .slice()
+    .sort((a, b) => a.seq - b.seq);
   if (!entries) return <div className="chain loading">Reading the audit log…</div>;
   if (!mine?.length)
     return <div className="chain loading">No audit entries carry this proposal's id.</div>;
@@ -146,7 +189,23 @@ function AuditChainRow({ data, entries }: { data: DetailRow; entries?: AuditEntr
             <span className="chain-type">{entry.type}</span>
             <span className="chain-actor mono">{entry.actor}</span>
             <time>{new Date(entry.ts).toLocaleString()}</time>
-            <code title={`prev ${entry.prevHash}`}>{entry.hash.slice(0, 16)}…</code>
+            {/* The payload is the part worth expanding a row for: proposal.executed
+             *  carries the resource PayPal actually created. Without it this row said
+             *  only that something happened, which the Audit tab already said. */}
+            <span className="chain-payload mono" title={JSON.stringify(entry.payload)}>
+              {chainSummary(entry)}
+            </span>
+            {/* Each entry carries the hash of the one before it, so showing both ends of
+             *  the link is what makes the chain legible as a chain. The old tooltip put
+             *  the previous hash on the current one, which left the full current hash
+             *  nowhere to be read. */}
+            <code className="chain-link" title={`this entry ${entry.hash}`}>
+              <span className="chain-prev" title={`previous entry ${entry.prevHash}`}>
+                {entry.prevHash === '0'.repeat(64) ? 'genesis' : `${entry.prevHash.slice(0, 8)}…`}
+              </span>
+              {' → '}
+              {entry.hash.slice(0, 8)}…
+            </code>
           </li>
         ))}
       </ol>
