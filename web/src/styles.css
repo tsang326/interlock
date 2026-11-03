@@ -204,7 +204,12 @@ select:focus {
   position: absolute;
   z-index: 5;
   left: 50%;
-  bottom: 18px;
+  /* Measured on the live build: the pinned totals row is 64px tall at the bottom of
+     .grid-wrap, and an 18px offset put the bar straight over it -- the gallery shot had
+     "2,490.50 USD" with its first digit hidden. 76px clears the footer. When the grid is
+     full the bar covers the last data row instead, which the reviewer can scroll away;
+     the totals row is pinned and can never be scrolled out from under it. */
+  bottom: 76px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -942,7 +947,9 @@ button.linkish:hover {
   display: grid;
   /* seq, event, actor, time, payload, hash link. The payload takes the slack because it
      is the only column whose length varies with the entry. */
-  grid-template-columns: 44px 150px 148px 150px minmax(0, 1fr) 150px;
+  /* Widths measured against the real text, not guessed: agent:agent-billing-01 needs 159px,
+     so 148 ellipsised it. The payload is prose and is meant to clip. */
+  grid-template-columns: 44px 150px 162px 150px minmax(0, 1fr) 150px;
   align-items: center;
   gap: 10px;
   font-size: 12px;
