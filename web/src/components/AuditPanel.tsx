@@ -116,8 +116,8 @@ export function AuditPanel({
                 <td className="mono">{new Date(entry.ts).toLocaleString()}</td>
                 <td className="mono">{entry.type}</td>
                 <td className="mono">{entry.actor}</td>
-                <td className="mono" style={{ color: 'var(--muted)' }}>
-                  {JSON.stringify(entry.payload).slice(0, 160)}
+                <td className="mono audit-detail" title={JSON.stringify(entry.payload)}>
+                  {summarise(entry.payload)}
                 </td>
                 <td className="mono" style={{ color: 'var(--muted)' }}>
                   {entry.prevHash === '0'.repeat(64) ? 'genesis' : `${entry.prevHash.slice(0, 8)}…`}
@@ -139,4 +139,32 @@ export function AuditPanel({
       </div>
     </div>
   );
+}
+
+/**
+ * A raw JSON dump cut at a fixed length ended mid-token on most rows -- `"declaredAmount":
+ * {"value":74.5,"cur` -- which reads as a broken field rather than a shortened one. Show
+ * the entry's own fields as key=value instead, and keep the full JSON in the title.
+ */
+function summarise(payload: unknown): string {
+  if (payload === null || payload === undefined) return '';
+  if (typeof payload !== 'object') return String(payload);
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    let text: string;
+    if (value === null || value === undefined) text = '—';
+    else if (typeof value === 'object') {
+      const inner = value as Record<string, unknown>;
+      // Money arrives as {value, currency}; anything else is named, not spelled out.
+      text =
+        'value' in inner
+          ? `${inner.value}${inner.currency ? ` ${inner.currency}` : ''}`
+          : Array.isArray(value)
+            ? `${value.length} item${value.length === 1 ? '' : 's'}`
+            : '{…}';
+    } else text = String(value);
+    if (text.length > 60) text = `${text.slice(0, 59)}…`;
+    parts.push(`${key} ${text}`);
+  }
+  return parts.join('  ·  ');
 }
