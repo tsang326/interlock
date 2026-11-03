@@ -748,3 +748,156 @@ button.linkish:hover {
   left: 4px;
   color: var(--muted);
 }
+
+/* ---------- queue tools (quick filter, risk chips, export) ---------- */
+
+.grid-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.grid-tools .spacer {
+  flex: 1;
+}
+
+.quick-filter {
+  min-width: 240px;
+  padding: 7px 10px;
+  background: #0e1115;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+}
+.quick-filter:focus {
+  outline: none;
+  border-color: #4c8dff;
+}
+
+.chips {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: #0e1115;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.chip {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip:hover {
+  color: var(--fg);
+}
+.chip.on {
+  background: #13203a;
+  color: #cfe0ff;
+}
+
+/* The chevron sits in its own narrow pinned column, so it gets the whole cell. */
+.expand-cell {
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chev {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.12s ease, color 0.12s ease;
+}
+.chev:hover {
+  color: var(--fg);
+  background: #171c23;
+}
+.chev.open {
+  transform: rotate(90deg);
+  color: #cfe0ff;
+}
+
+/* ---------- the audit chain drawn under a row ---------- */
+
+.row-detail {
+  background: #0a0c0f;
+}
+.chain {
+  height: 100%;
+  padding: 10px 14px 12px 56px;
+  border-left: 2px solid #4c8dff;
+  overflow: auto;
+}
+.chain.loading {
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+}
+.chain > header {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.chain ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.chain li {
+  display: grid;
+  grid-template-columns: 44px 170px 160px 150px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid #141a21;
+}
+.chain .chain-type {
+  color: #cfe0ff;
+}
+.chain .chain-actor,
+.chain time {
+  color: var(--muted);
+}
+.chain code {
+  color: #7d8da3;
+  font-size: 11px;
+}
+
+/* ---------- pinned totals row ---------- */
+
+.totals-label,
+.totals-count {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* The totals row is recomputed on every filter change, and the change flash on the
+   risk and status columns turned the whole footer green each time. Body rows keep it. */
+.ag-grid-pinned-bottom-rows .ag-cell-data-changed,
+.ag-grid-pinned-bottom-rows .ag-cell-data-changed-animation {
+  background-color: transparent !important;
+  transition: none !important;
+}
