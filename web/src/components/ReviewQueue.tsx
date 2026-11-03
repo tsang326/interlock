@@ -11,6 +11,7 @@ import type {
 } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { api, type AuditEntry, type Proposal } from '../lib/api';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -57,16 +58,17 @@ function RiskCell({ data }: { data?: Row }) {
   if (isTotals(data)) return <span className="totals-label">Filtered view</span>;
   if (!isProposal(data)) return null;
   const { score, ruleScore, modelScore } = data.risk;
+  // The split is worth a line only when the two layers can disagree. Where the model did
+  // not run, "model off" was true on every row at once, which is a property of the
+  // deployment and is stated once above the grid instead.
+  const split = modelScore === undefined ? undefined : `rules ${ruleScore} \u00b7 model ${modelScore}`;
   return (
-    <span className={`risk ${band(score)}`}>
+    <span className={`risk ${band(score)}`} title={split ?? `rules ${ruleScore}, model did not run`}>
       <span className="bar">
         <i style={{ width: `${score}%` }} />
       </span>
       <b>{score}</b>
-      <small className="split">
-        rules {ruleScore}
-        {modelScore === undefined ? ' · model off' : ` · model ${modelScore}`}
-      </small>
+      {split && <small className="split">{split}</small>}
     </span>
   );
 }
@@ -153,6 +155,14 @@ function AuditChainRow({ data, entries }: { data: DetailRow; entries?: AuditEntr
 }
 
 type Props = {
+  /** The status chips and bulk actions, which belong to the page rather than the grid.
+   *  They render inside the grid's own toolbar so there is one row of controls, not two. */
+  leading?: ReactNode;
+  /** Page-level actions that belong on the right of the same row, beside the export. */
+  trailing?: ReactNode;
+  /** Set when the seeded queue was scored without the model, which is a property of the
+   *  deployment rather than of any one row: said once here, not on all fourteen. */
+  modelOff?: boolean;
   proposals: Proposal[];
   selectedId?: string;
   onSelect: (proposal: Proposal) => void;
@@ -167,9 +177,12 @@ const BANDS = [
 ] as const;
 type BandKey = (typeof BANDS)[number]['key'];
 
-const STATE_KEY = 'interlock.queue.gridstate';
+// v2: a saved state carries column visibility and widths, so a reviewer who had seen the
+// old layout would keep the truncated Why column and the wide Target. Bumping the key
+// hands everyone the new defaults once, and their own adjustments survive from there.
+const STATE_KEY = 'interlock.queue.gridstate.v2';
 
-export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange }: Props) {
+export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId, onSelect, onSelectionChange }: Props) {
   const [query, setQuery] = useState('');
   const [bandFilter, setBandFilter] = useState<BandKey>('all');
   const [expandedId, setExpandedId] = useState<string>();
@@ -266,7 +279,8 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
       {
         colId: 'kind',
         headerName: 'Action',
-        width: 184,
+        flex: 1,
+        minWidth: 184,
         cellClass: 'mono',
         filter: 'agTextColumnFilter',
         valueGetter: (p) => (isProposal(p.data) ? p.data.kind : null),
@@ -285,7 +299,8 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
       {
         colId: 'counterparty',
         headerName: 'Target',
-        width: 172,
+        width: 124,
+        tooltipValueGetter: (p) => String(p.value ?? ''),
         cellClass: 'mono',
         filter: 'agTextColumnFilter',
         valueGetter: (p) => (isProposal(p.data) ? (p.data.counterparty ?? 'unknown') : null),
@@ -293,11 +308,14 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
       {
         colId: 'why',
         headerName: 'Why Interlock decided this',
-        flex: 1,
+        // Hidden, not removed: at 240px it truncated on every row and five rows in a row
+        // read the same rule name, which the Risk column already says. The reviewer reads
+        // it in full in the panel; the CSV still exports it by column id.
+        hide: true,
         minWidth: 240,
         filter: 'agTextColumnFilter',
         valueGetter: (p) => (isProposal(p.data) ? p.data.policy.reason : ''),
-        tooltip: (p) => String(p.value ?? ''),
+        tooltipValueGetter: (p) => String(p.value ?? ''),
       },
       {
         colId: 'createdAt',
@@ -369,6 +387,7 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
   return (
     <>
       <div className="grid-tools">
+        {leading}
         <input
           className="quick-filter"
           type="search"
@@ -390,6 +409,12 @@ export function ReviewQueue({ proposals, selectedId, onSelect, onSelectionChange
           ))}
         </div>
         <span className="spacer" />
+        {modelOff && (
+          <span className="tool-note" title="INTERLOCK_SEED_MODEL is off on the public demo, so the queue it boots with costs no model calls. Anything an agent files after boot is scored by the model.">
+            seeded queue scored by rules
+          </span>
+        )}
+        {trailing}
         <button
           type="button"
           onClick={() =>

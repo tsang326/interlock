@@ -84,6 +84,18 @@ export default function App() {
     [proposals, selectedId],
   );
 
+  // The panel is a quarter of the window and opened empty, so the first thing a visitor
+  // saw there was a line telling them to click something. Open the top proposal instead;
+  // a reviewer who selects another one is not overridden, because this only fires while
+  // nothing is selected.
+  useEffect(() => {
+    if (!selectedId && proposals[0]) setSelectedId(proposals[0].id);
+  }, [proposals, selectedId]);
+
+  // Said once above the grid rather than on every row. True of the public demo, where the
+  // seeded queue is scored without the model; the first agent-filed proposal clears it.
+  const modelOff = proposals.length > 0 && proposals.every((p) => p.risk.modelScore === undefined);
+
   const pendingCount = useMemo(
     () => proposals.filter((p) => p.status === 'pending').length,
     [proposals],
@@ -205,7 +217,7 @@ export default function App() {
         </div>
       )}
 
-      {token && guideOpen && (
+      {token && guideOpen && tab === 'queue' && (
         <section className="guide" aria-label="Start here">
           <b>Start here</b>
           <ol>
@@ -233,48 +245,53 @@ export default function App() {
       <div className="main">
         <div className="content">
           {tab === 'queue' && (
-            <>
-              <div className="toolbar">
-                {(['pending', 'blocked', 'executed', 'all'] as Filter[]).map((f) => (
-                  <button
-                    key={f}
-                    className={filter === f ? 'primary' : ''}
-                    onClick={() => setFilter(f)}
-                  >
-                    {f}
-                  </button>
-                ))}
-                <span className="spacer" />
-                {checkedPending.length > 0 && (
-                  <>
-                    <span className="hint">{checkedPending.length} selected</span>
-                    <button
-                      className="primary"
-                      disabled={busy}
-                      onClick={() => void decide('approve', checkedPending, 'bulk approve')}
-                    >
-                      Approve selected
-                    </button>
-                    <button
-                      className="danger"
-                      disabled={busy}
-                      onClick={() => void decide('reject', checkedPending, 'bulk reject')}
-                    >
-                      Reject selected
-                    </button>
-                  </>
-                )}
+            <ReviewQueue
+              proposals={proposals}
+              modelOff={modelOff}
+              selectedId={selectedId}
+              onSelect={(p) => setSelectedId(p.id)}
+              onSelectionChange={setCheckedIds}
+              trailing={
                 <button onClick={() => void load()} disabled={busy}>
                   Refresh
                 </button>
-              </div>
-              <ReviewQueue
-                proposals={proposals}
-                selectedId={selectedId}
-                onSelect={(p) => setSelectedId(p.id)}
-                onSelectionChange={setCheckedIds}
-              />
-            </>
+              }
+              leading={
+                <>
+                  <div className="chips" role="group" aria-label="Filter by status">
+                    {(['pending', 'blocked', 'executed', 'all'] as Filter[]).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`chip${filter === f ? ' on' : ''}`}
+                        onClick={() => setFilter(f)}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                  {checkedPending.length > 0 && (
+                    <>
+                      <span className="hint">{checkedPending.length} selected</span>
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => void decide('approve', checkedPending, 'bulk approve')}
+                      >
+                        Approve selected
+                      </button>
+                      <button
+                        className="danger"
+                        disabled={busy}
+                        onClick={() => void decide('reject', checkedPending, 'bulk reject')}
+                      >
+                        Reject selected
+                      </button>
+                    </>
+                  )}
+                </>
+              }
+            />
           )}
 
           {tab === 'agent' && (
