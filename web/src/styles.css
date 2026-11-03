@@ -578,8 +578,27 @@ dl.compare dd {
   font-variant-numeric: tabular-nums;
 }
 
+/* The row is the unit of work here: a reviewer opens a proposal, not a field. AG Grid
+   draws a blue outline around the focused *cell*, which was the loudest thing on screen
+   and said the wrong thing -- clicking the Action cell looked like it had selected the
+   word create_refund. The cell outline is off; the row that is open in the panel is what
+   is marked, and keyboard focus marks the whole row too. */
 .row-open {
+  background: #141c28;
   box-shadow: inset 3px 0 0 var(--accent);
+}
+.row-open .ag-cell {
+  background: transparent;
+}
+.ag-cell-focus,
+.ag-cell:focus,
+.ag-cell:focus-visible {
+  outline: none !important;
+  border-color: transparent !important;
+}
+/* Keyboard users still need to see where they are, so the row carries it. */
+.ag-row:has(.ag-cell-focus) {
+  box-shadow: inset 0 0 0 1px #2f4466;
 }
 
 /* ---------- grid cell alignment ---------- */
