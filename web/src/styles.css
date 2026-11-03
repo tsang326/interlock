@@ -840,9 +840,12 @@ button.linkish:hover {
   align-items: center;
   justify-content: center;
 }
+/* Same trap as the row checkbox: a 22x22 button in a 40x63 cell left most of the cell
+   dead. The button fills its own cell now -- still one cell per row -- and the glyph,
+   not the button, is what rotates, so the hit area stays rectangular when it opens. */
 .chev {
-  width: 22px;
-  height: 22px;
+  width: 100%;
+  height: 100%;
   padding: 0;
   border: 0;
   border-radius: 5px;
@@ -855,11 +858,17 @@ button.linkish:hover {
 }
 .chev:hover {
   color: var(--fg);
-  background: #171c23;
+  background: #141920;
 }
 .chev.open {
-  transform: rotate(90deg);
   color: #cfe0ff;
+}
+.chev-glyph {
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+.chev.open .chev-glyph {
+  transform: rotate(90deg);
 }
 
 /* ---------- the audit chain drawn under a row ---------- */

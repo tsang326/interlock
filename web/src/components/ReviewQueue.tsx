@@ -247,7 +247,7 @@ export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId
                 setExpandedId(open ? undefined : id);
               }}
             >
-              ›
+              <span className="chev-glyph">›</span>
             </button>
           );
         },
@@ -484,7 +484,26 @@ export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId
             enableClickSelection: false,
             isRowSelectable: (node) => isProposal(node.data),
           }}
-          selectionColumnDef={{ width: 44, pinned: 'left', resizable: false }}
+          selectionColumnDef={{
+            width: 44,
+            pinned: 'left',
+            resizable: false,
+            // The checkbox is a 22x14 control in a 44x63 cell, and because a click on the
+            // row body opens the proposal rather than selecting it, every near miss did
+            // nothing at all -- only the header's select-all felt reliable, because its
+            // row is half the height. Resizing the input does not work: its box comes
+            // from the user agent, and forcing width on it changes nothing. So the cell
+            // takes the click instead. It is this row's own cell, so a click anywhere in
+            // it toggles this row and no other.
+            onCellClicked: (event) => {
+              const target = event.event?.target as HTMLElement | undefined;
+              // A hit on the real checkbox has already toggled the row; toggling again
+              // here would undo it.
+              if (target?.closest('.ag-checkbox-input-wrapper')) return;
+              if (!isProposal(event.data)) return;
+              event.node.setSelected(!event.node.isSelected());
+            },
+          }}
           animateRows
           getRowClass={rowClass}
           // Sorting is free to put the rows in any order, and a detail row has no risk
@@ -507,6 +526,9 @@ export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId
             // target instead: a click on the chevron expands and nothing else.
             const target = e.event?.target as HTMLElement | undefined;
             if (target?.closest('.expand-cell')) return;
+            // The selection cell now answers clicks across its whole width, so a tick
+            // must not also open the proposal in the panel.
+            if (target?.closest('[col-id="ag-Grid-SelectionColumn"]')) return;
             if (isProposal(e.data)) onSelect(e.data);
           }}
           onSelectionChanged={(e) =>
