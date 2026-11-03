@@ -257,39 +257,41 @@ export default function App() {
                 </button>
               }
               leading={
-                <>
-                  <div className="chips" role="group" aria-label="Filter by status">
-                    {(['pending', 'blocked', 'executed', 'all'] as Filter[]).map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        className={`chip${filter === f ? ' on' : ''}`}
-                        onClick={() => setFilter(f)}
-                      >
-                        {f}
-                      </button>
-                    ))}
-                  </div>
-                  {checkedPending.length > 0 && (
-                    <>
-                      <span className="hint">{checkedPending.length} selected</span>
-                      <button
-                        className="primary"
-                        disabled={busy}
-                        onClick={() => void decide('approve', checkedPending, 'bulk approve')}
-                      >
-                        Approve selected
-                      </button>
-                      <button
-                        className="danger"
-                        disabled={busy}
-                        onClick={() => void decide('reject', checkedPending, 'bulk reject')}
-                      >
-                        Reject selected
-                      </button>
-                    </>
-                  )}
-                </>
+                <div className="chips" role="group" aria-label="Filter by status">
+                  {(['pending', 'blocked', 'executed', 'all'] as Filter[]).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`chip${filter === f ? ' on' : ''}`}
+                      onClick={() => setFilter(f)}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              }
+              bulkActions={
+                checkedPending.length > 0 ? (
+                  <>
+                    <span className="hint">
+                      {checkedPending.length} selected
+                    </span>
+                    <button
+                      className="primary"
+                      disabled={busy}
+                      onClick={() => void decide('approve', checkedPending, 'bulk approve')}
+                    >
+                      Approve selected
+                    </button>
+                    <button
+                      className="danger"
+                      disabled={busy}
+                      onClick={() => void decide('reject', checkedPending, 'bulk reject')}
+                    >
+                      Reject selected
+                    </button>
+                  </>
+                ) : undefined
               }
             />
           )}

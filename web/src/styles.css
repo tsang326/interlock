@@ -194,6 +194,26 @@ select:focus {
 .grid-wrap {
   flex: 1;
   min-height: 320px;
+  position: relative;
+}
+
+/* Floats over the grid, bottom centre, so showing it costs no layout. Putting these
+   controls in the toolbar grew it by a row the moment the first checkbox was ticked,
+   which moved every row down 43px and made the next click miss. */
+.bulk-bar {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #161b22;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
 }
 
 /* ---------- cells ---------- */
@@ -757,10 +777,9 @@ button.linkish:hover {
   gap: 10px;
   /* One row, not three. Three stacked bands of controls took 160px off a 1000px window
      before the first row of data, and the grid could then show eight of fourteen rows.
-     It wraps rather than clips: selecting a row adds the count and the two bulk buttons,
-     and with nowrap that pushed Export CSV off the end where it could not be reached. */
-  flex-wrap: wrap;
-  row-gap: 8px;
+     It stays one row: the bulk actions float over the grid instead of joining it, so
+     this row's height never changes and the rows below never move. */
+  flex-wrap: nowrap;
 }
 .grid-tools .spacer {
   flex: 1;
