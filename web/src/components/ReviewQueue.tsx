@@ -186,6 +186,15 @@ type BandKey = (typeof BANDS)[number]['key'];
 // hands everyone the new defaults once, and their own adjustments survive from there.
 const STATE_KEY = 'interlock.queue.gridstate.v2';
 
+// AG Grid reads these as part of the grid's definition, so a fresh object or function on
+// every render makes it rebuild columns for nothing. None of them depend on props, so they
+// are defined once. (Measured: this alone did not change how many clicks landed.)
+const DEFAULT_COL_DEF: ColDef<Row> = { sortable: true, filter: true, resizable: true };
+// overlayNoRowsTemplate covers an empty queue; a queue filtered down to nothing is a
+// separate overlay with its own wording, which defaulted to AG Grid's.
+const LOCALE_TEXT = { noMatchingRows: 'Nothing matches these filters.' };
+const getRowId = (p: { data: Row }) => p.data.id;
+
 export function ReviewQueue({ leading, trailing, bulkActions, modelOff, proposals, selectedId, onSelect, onSelectionChange }: Props) {
   const [query, setQuery] = useState('');
   const [bandFilter, setBandFilter] = useState<BandKey>('all');
@@ -369,14 +378,25 @@ export function ReviewQueue({ leading, trailing, bulkActions, modelOff, proposal
         currency = money.currency;
       }
     });
-    setTotals({ count, sum, currency });
+    // onModelUpdated calls this, and a new totals object replaces pinnedBottomRowData,
+    // which updates the model and calls this again. Handing React a fresh object every
+    // time made that a loop: with nobody touching the page the grid was recreating its
+    // cells about 7,300 times a second, and a click whose mousedown and mouseup fell
+    // either side of one lost its node, so the browser fired no click event and the row
+    // did not tick. Returning the previous object when the figures match ends the cycle.
+    setTotals((prev) =>
+      prev.count === count && prev.sum === sum && prev.currency === currency
+        ? prev
+        : { count, sum, currency },
+    );
   }, []);
 
-  // Both of these were object literals in the JSX, so every render handed AG Grid a new
-  // one and it rebuilt the selection column. A rebuild between mousedown and mouseup
-  // swallows the click, and since ticking a row re-renders this component, roughly every
-  // other click on a checkbox did nothing -- which is what "the boxes will not tick"
-  // actually was. Their contents never change, so they are built once.
+  // Object literals in the JSX handed AG Grid a new definition on every render. That is
+  // not what lost the clicks -- a render loop was, see recountTotals -- but their contents
+  // never change, so there is no reason to rebuild them.
+  // readSavedState() returns a new object each call; the grid only needs it once.
+  const initialState = useMemo(() => readSavedState(), []);
+
   const rowSelection = useMemo(
     () =>
       ({
@@ -483,11 +503,11 @@ export function ReviewQueue({ leading, trailing, bulkActions, modelOff, proposal
           theme={theme}
           rowData={rowData}
           columnDefs={columns}
-          getRowId={(p) => p.data.id}
+          getRowId={getRowId}
           quickFilterText={query}
           // Column widths, sort and filters are a reviewer's own setup; losing them on
           // every reload is the kind of small insult that stops people using a tool.
-          initialState={readSavedState()}
+          initialState={initialState}
           onStateUpdated={(event) => {
             try {
               localStorage.setItem(STATE_KEY, JSON.stringify(event.state));
@@ -558,11 +578,9 @@ export function ReviewQueue({ leading, trailing, bulkActions, modelOff, proposal
           }
           onFilterChanged={recountTotals}
           onModelUpdated={recountTotals}
-          defaultColDef={{ sortable: true, filter: true, resizable: true }}
+          defaultColDef={DEFAULT_COL_DEF}
           overlayNoRowsTemplate={'<span style="color:#8b95a3">Nothing in this view.</span>'}
-          // overlayNoRowsTemplate covers an empty queue; a queue filtered down to nothing
-          // is a separate overlay with its own wording, which defaulted to AG Grid's.
-          localeText={{ noMatchingRows: 'Nothing matches these filters.' }}
+          localeText={LOCALE_TEXT}
         />
       </div>
     </>
