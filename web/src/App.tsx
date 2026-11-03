@@ -227,9 +227,11 @@ export default function App() {
               agent. Watch what it proposes.
             </li>
             <li>
-              <button className="linkish" onClick={() => setTab('queue')}>Review queue</button>: open
-              the proposal it filed. Interlock held it, and shows what PayPal itself says next to what
-              the agent claimed.
+              {/* Not a link. The guide only renders while tab === 'queue', so the reader is
+                  already here; a button that calls setTab('queue') looks broken, because
+                  pressing it does nothing at all. */}
+              <b>Review queue</b> (this page): open the proposal it filed. Interlock held it, and
+              shows what PayPal itself says next to what the agent claimed.
             </li>
             <li>
               <button className="linkish" onClick={() => setTab('audit')}>Audit</button>: verify the
