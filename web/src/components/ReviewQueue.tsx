@@ -160,6 +160,10 @@ type Props = {
   leading?: ReactNode;
   /** Page-level actions that belong on the right of the same row, beside the export. */
   trailing?: ReactNode;
+  /** Bulk actions for the checked rows. They float over the grid rather than sitting in
+   *  the toolbar: appearing there changed the toolbar's height, which moved every row
+   *  down 43px mid-interaction and sent the next click to the wrong one. */
+  bulkActions?: ReactNode;
   /** Set when the seeded queue was scored without the model, which is a property of the
    *  deployment rather than of any one row: said once here, not on all fourteen. */
   modelOff?: boolean;
@@ -182,7 +186,7 @@ type BandKey = (typeof BANDS)[number]['key'];
 // hands everyone the new defaults once, and their own adjustments survive from there.
 const STATE_KEY = 'interlock.queue.gridstate.v2';
 
-export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId, onSelect, onSelectionChange }: Props) {
+export function ReviewQueue({ leading, trailing, bulkActions, modelOff, proposals, selectedId, onSelect, onSelectionChange }: Props) {
   const [query, setQuery] = useState('');
   const [bandFilter, setBandFilter] = useState<BandKey>('all');
   const [expandedId, setExpandedId] = useState<string>();
@@ -368,6 +372,47 @@ export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId
     setTotals({ count, sum, currency });
   }, []);
 
+  // Both of these were object literals in the JSX, so every render handed AG Grid a new
+  // one and it rebuilt the selection column. A rebuild between mousedown and mouseup
+  // swallows the click, and since ticking a row re-renders this component, roughly every
+  // other click on a checkbox did nothing -- which is what "the boxes will not tick"
+  // actually was. Their contents never change, so they are built once.
+  const rowSelection = useMemo(
+    () =>
+      ({
+        mode: 'multiRow',
+        headerCheckbox: true,
+        enableClickSelection: false,
+        isRowSelectable: (node: IRowNode<Row>) => isProposal(node.data),
+      }) as const,
+    [],
+  );
+
+  const selectionColumnDef = useMemo<ColDef<Row>>(
+    () => ({
+      width: 44,
+      pinned: 'left',
+      resizable: false,
+      // The checkbox is a 22x14 control in a 44x63 cell, and because a click on the row
+      // body opens the proposal rather than selecting it, every near miss did nothing at
+      // all -- only the header's select-all felt reliable, because its row is half the
+      // height. Resizing the input does not work: its box comes from the user agent, and
+      // forcing a width on it, even inline, leaves it at 22x14. So the cell takes the
+      // click instead. It is this row's own cell, so a click anywhere in it toggles this
+      // row and no other.
+      onCellClicked: (event) => {
+        const target = event.event?.target as HTMLElement | undefined;
+        // Only the input itself toggles the row on its own; toggling again here would
+        // undo it. The wrapper is narrower than the input, so testing the wrapper left
+        // its own edges dead.
+        if (target instanceof HTMLInputElement) return;
+        if (!isProposal(event.data)) return;
+        event.node.setSelected(!event.node.isSelected());
+      },
+    }),
+    [],
+  );
+
   const pinnedBottom = useMemo<TotalsRow[]>(() => [{ id: 'totals', totals }], [totals]);
 
   // Row heights are cached, and the chain's height is only known once the audit log
@@ -433,6 +478,7 @@ export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId
         </button>
       </div>
       <div className="grid-wrap">
+        {bulkActions && <div className="bulk-bar">{bulkActions}</div>}
         <AgGridReact<Row>
           theme={theme}
           rowData={rowData}
@@ -478,32 +524,8 @@ export function ReviewQueue({ leading, trailing, modelOff, proposals, selectedId
             return 46 + Math.min(mine, 8) * 23;
           }}
           pinnedBottomRowData={pinnedBottom}
-          rowSelection={{
-            mode: 'multiRow',
-            headerCheckbox: true,
-            enableClickSelection: false,
-            isRowSelectable: (node) => isProposal(node.data),
-          }}
-          selectionColumnDef={{
-            width: 44,
-            pinned: 'left',
-            resizable: false,
-            // The checkbox is a 22x14 control in a 44x63 cell, and because a click on the
-            // row body opens the proposal rather than selecting it, every near miss did
-            // nothing at all -- only the header's select-all felt reliable, because its
-            // row is half the height. Resizing the input does not work: its box comes
-            // from the user agent, and forcing width on it changes nothing. So the cell
-            // takes the click instead. It is this row's own cell, so a click anywhere in
-            // it toggles this row and no other.
-            onCellClicked: (event) => {
-              const target = event.event?.target as HTMLElement | undefined;
-              // A hit on the real checkbox has already toggled the row; toggling again
-              // here would undo it.
-              if (target?.closest('.ag-checkbox-input-wrapper')) return;
-              if (!isProposal(event.data)) return;
-              event.node.setSelected(!event.node.isSelected());
-            },
-          }}
+          rowSelection={rowSelection}
+          selectionColumnDef={selectionColumnDef}
           animateRows
           getRowClass={rowClass}
           // Sorting is free to put the rows in any order, and a detail row has no risk
