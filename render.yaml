@@ -33,6 +33,12 @@ services:
       - key: OPENAI_API_KEY
         sync: false
 
+      # Optional fallback: when OpenAI cannot answer (credit spent, rate limit, outage),
+      # both jobs go to Claude (claude-haiku-5-5; INTERLOCK_FALLBACK_MODEL to change it),
+      # metered on the same spend ceiling.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
       # The free plan has no disk, so the queue is rebuilt at every cold start. Scoring
       # it with the model would spend one model call per proposal each time it wakes —
       # which strangers visiting the URL would be triggering, without a ceiling. So the
