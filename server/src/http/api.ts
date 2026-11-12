@@ -13,7 +13,7 @@ import {
   type PayPalExecutor,
 } from '../paypal/executor.js';
 import { INBOX } from '../agent/inbox.js';
-import { modelSpend } from '../model.js';
+import { lastModelProvider, modelSpend } from '../model.js';
 import { runAgent } from '../agent/run.js';
 import { callerOf, requireRole } from './auth.js';
 
@@ -122,6 +122,10 @@ export function createApi(
       paypal: paypalConfigured ? (config.paypal.sandbox ? 'sandbox' : 'live') : 'simulated',
       riskModel: modelConfigured ? config.model.riskModel : null,
       agentModel: modelConfigured ? config.model.agentModel : null,
+      // Claude answers both jobs when OpenAI cannot; this says whether it is set up and
+      // which provider answered last.
+      fallbackModel: config.fallback.apiKey ? config.fallback.model : null,
+      lastProvider: lastModelProvider(),
       // What is callable here, not what is allow-listed: two of the sixteen cannot
       // answer in the sandbox, and a number a reviewer can disprove by clicking is
       // worse than a smaller true one.
@@ -212,7 +216,7 @@ export function createApi(
     if (!modelConfigured) {
       res.status(503).json({
         error: 'no_model',
-        detail: 'The agent needs OPENAI_API_KEY. Interlock itself runs without one.',
+        detail: 'The agent needs OPENAI_API_KEY or ANTHROPIC_API_KEY. Interlock itself runs without one.',
       });
       return;
     }

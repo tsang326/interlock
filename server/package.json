@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "tsx src/seed.ts",
-    "test": "OPENAI_API_KEY= tsx --test src/interlock.test.ts",
+    "test": "OPENAI_API_KEY= ANTHROPIC_API_KEY= tsx --test src/interlock.test.ts src/fallback.test.ts",
     "agent": "tsx src/agent/cli.ts"
   },
   "dependencies": {

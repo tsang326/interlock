@@ -29,6 +29,12 @@ export const config = {
     agentModel: process.env.INTERLOCK_AGENT_MODEL ?? process.env.INTERLOCK_MODEL ?? DEFAULT_MODEL,
     riskModel: process.env.INTERLOCK_RISK_MODEL ?? process.env.INTERLOCK_MODEL ?? DEFAULT_MODEL,
   },
+  // Answers when OpenAI cannot (credit spent, rate limit, outage). Both jobs move to the
+  // one fallback model; without a key an OpenAI failure surfaces exactly as before.
+  fallback: {
+    apiKey: optional('ANTHROPIC_API_KEY'),
+    model: process.env.INTERLOCK_FALLBACK_MODEL ?? 'claude-haiku-5-5',
+  },
   auth: {
     // Demo defaults so a judge can run the project without inventing secrets. A real
     // deployment sets both; `INTERLOCK_REQUIRE_TOKENS=true` refuses to start without them.
@@ -67,7 +73,7 @@ export const config = {
 export const paypalConfigured = Boolean(config.paypal.clientId && config.paypal.clientSecret);
 
 /** True when risk scoring can use the model; otherwise it falls back to heuristics. */
-export const modelConfigured = Boolean(config.model.apiKey);
+export const modelConfigured = Boolean(config.model.apiKey || config.fallback.apiKey);
 
 /** True when the tokens are still the published demo values. */
 export const usingDemoTokens =

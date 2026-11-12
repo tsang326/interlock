@@ -74,7 +74,7 @@ export async function runAgent(
   onStep?: (step: AgentStep) => void,
 ): Promise<AgentRun> {
   if (!modelConfigured) {
-    throw new Error('The agent needs OPENAI_API_KEY. Interlock itself runs without it.');
+    throw new Error('The agent needs OPENAI_API_KEY or ANTHROPIC_API_KEY. Interlock itself runs without one.');
   }
 
   const sessionId = `agent-${task.id}-${Date.now().toString(36)}`;
